@@ -1,0 +1,3 @@
+[submodule "VulkanEngine"]
+	path = VulkanEngine
+	url = https://github.com/hevezolly/VulkanEngine.git

@@ -1,0 +1,41 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Debug",
+      "command": "${workspaceFolder}\\.vscode\\build.bat",
+      "args": [
+        "${workspaceFolder}",
+        "Debug"
+      ]
+    },
+    {
+      "label": "Build and Run Debug",
+      "command": "${workspaceFolder}\\.vscode\\build.bat",
+      "args": [
+        "${workspaceFolder}",
+        "Debug",
+        "-e"
+      ]
+    },
+    {
+      "label": "Build Release",
+      "command": "${workspaceFolder}\\.vscode\\build.bat",
+      "args": [
+        "${workspaceFolder}",
+        "Release"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Build and Run Release",
+      "command": "${workspaceFolder}\\.vscode\\build.bat",
+      "args": [
+        "${workspaceFolder}",
+        "Release",
+        "-e"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

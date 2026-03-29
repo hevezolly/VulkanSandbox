@@ -1,0 +1,4 @@
+/build
+.vscode/*
+!.vscode/build.bat
+!.vscode/tasks.json
