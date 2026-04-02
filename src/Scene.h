@@ -9,6 +9,11 @@
 
 class Scene {
 
+    struct CameraData {
+        glm::mat4x4 view;
+        glm::mat4x4 projection;
+    };
+
     struct ModelData {
         uint32_t indexOffset;
         uint32_t indexSize;
@@ -19,11 +24,19 @@ class Scene {
         BufferRegion uniformsRange;
     };
 
+    struct DrawContext {
+        BufferRegion mainViewCamera;
+        ResourceRef<Image> output;
+        ResourceRef<Image> depth;
+        ResourceRef<Buffer> vertexBuffer;
+        ResourceRef<Buffer> indexBuffer;
+    };
+
     struct MaterialPass {
 
         std::vector<uint32_t> models;
         
-        void (*setUpDraw)(RenderContext&, Scene&, MaterialPass&);
+        void (*setUpDraw)(RenderContext&, Scene&, const DrawContext&, MaterialPass&);
     };
 
     RenderContext& m_renderContext;
@@ -34,24 +47,29 @@ class Scene {
     
     ResourceRef<Buffer> m_vertexBuffer;
     ResourceRef<Buffer> m_indexBuffer;
-    ResourceRef<Buffer> m_cameraData;
+    ResourceRef<Image> m_depthBuffer;
 
     std::vector<ModelData> m_models;
     std::vector<MaterialPass> m_passes;
 
     template<typename Attachments, typename... Bindings>
-    void QueueDrawModels(GraphicsNode<Attachments, Transforms, Bindings...>& node, std::vector<uint32_t>& models, const Bindings&... values) {
+    static void QueueDrawModels(
+        GraphicsNode<Attachments, Transforms, Bindings...>& node, 
+        const DrawContext& drawContext,
+        std::vector<uint32_t>& models, 
+        const Bindings&... values
+    ) {
         
-        node.SetIndexBuffer(m_indexBuffer, VkIndexType::VK_INDEX_TYPE_UINT32);
-        node.AddVertexBuffer(m_vertexBuffer);
+        node.SetIndexBuffer(drawContext.indexBuffer, VkIndexType::VK_INDEX_TYPE_UINT32);
+        node.AddVertexBuffer(drawContext.vertexBuffer);
 
         uint32_t i = 0;
         for (uint32_t index: models) {
             ModelData model = m_models[index];
 
             Transforms t = Transforms {
-                .model = model.uniformsRange,
-                .camera = m_cameraData
+                .camera = drawContext.mainViewCamera,
+                .model = model.uniformsRange
             };
 
             if (i++ == 0) {
@@ -66,6 +84,20 @@ class Scene {
         }
     }
 
+    void InitializeResources() {
+        Resources& resources = m_renderContext.Get<Resources>();
+        
+        m_vertexBuffer = resources.CreateBuffer(BufferPreset::VERTEX, m_vertices);
+        resources.GiveName(m_vertexBuffer, "vertex buffer");
+
+        m_indexBuffer = resources.CreateBuffer(BufferPreset::INDEX, m_indices);
+        resources.GiveName(m_indexBuffer, "index buffer");
+        
+        auto extents = m_renderContext.Get<PresentFeature>().swapChain->extent;
+        m_depthBuffer = resources.CreateImage(ImageDescription(materialDatabase.depthFormat, ImageUsage::DepthStencil, extents));
+        resources.GiveName(m_depthBuffer, "depth buffer");
+    }
+
     void PopulateScene() {
 
         uint32_t defaultColorMaterial = AddMaterial(&DefaultColorMaterial);
@@ -73,26 +105,48 @@ class Scene {
         uint32_t viking_room = AddObject("models/viking_room.obj", defaultColorMaterial);
     }
 
+    CameraData UpdateCameraPosition() {
+        static auto startTime = std::chrono::high_resolution_clock::now();
+
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+        SwapChain* swapChain = m_renderContext.Get<PresentFeature>().swapChain;
+        CameraData d;
+        d.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        d.projection = glm::perspective(glm::radians(45.0f), swapChain->extent.width / (float) swapChain->extent.height, 0.1f, 10.0f);
+        d.projection[1][1] *= -1;
+
+        return d;
+    } 
+
 public:
 
     MaterialDatabase materialDatabase;
 
 
-    static void DefaultColorMaterial(RenderContext& context, Scene& scene, MaterialPass& material) {
+    static void DefaultColorMaterial(RenderContext& context, Scene& scene, const DrawContext& drawContext, MaterialPass& material) {
 
         auto& node = context.Get<RenderGraph>().AddNode<GraphicsNode<DefaultColorAttachments, Transforms>>(
             scene.materialDatabase.GetPipeline(PipelineType::DefaultColor));
 
         node.SetName("Default Color Node");
+        node.SetAttachments(
+            DefaultColorAttachments{
+                .color = drawContext.output,
+                .depth = drawContext.depth
+            }
+        );
         
-        scene.QueueDrawModels(node, material.models);
+        Scene::QueueDrawModels(node, drawContext, material.models);
     }
     
     Scene(RenderContext& context): m_renderContext(context), materialDatabase(context) {
         PopulateScene();
+        InitializeResources();
     }
     
-    uint32_t AddMaterial(void (*setUpDraw)(RenderContext&, Scene&, MaterialPass&)) {
+    uint32_t AddMaterial(void (*setUpDraw)(RenderContext&, Scene&, const DrawContext&, MaterialPass&)) {
 
         uint32_t materialId = m_passes.size();
 
@@ -128,12 +182,19 @@ public:
     }
 
     void OnBeginFrame() {
-
     }
 
     void OnPrepareDraw(ResourceRef<Image> output) {
 
-        
+        if (m_depthBuffer)
+
+        DrawContext drawContext {
+            .mainViewCamera = m_renderContext.Get<DynamicUniforms>().Allocate(UpdateCameraPosition()),
+            .output = output,
+            .depth = ,
+            .vertexBuffer = m_vertexBuffer,
+            .indexBuffer = m_indexBuffer,
+        };
 
         for (MaterialPass& pass: m_passes) {
             pass.setUpDraw(m_renderContext, *this, pass);

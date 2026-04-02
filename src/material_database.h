@@ -6,7 +6,7 @@
 
 #define BLOCK_NAME Transforms
 #define BLOCK \
-UNIFORM_BUFFER(camera, 0, Stage::Vertex) \
+DYNAMIC_UNIFORM(camera, 0, Stage::Vertex) \
 DYNAMIC_UNIFORM(model, 1, Stage::Vertex)
 #include <gen_bindings.h>
 
