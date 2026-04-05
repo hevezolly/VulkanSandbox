@@ -19,17 +19,21 @@ class Scene {
         uint32_t indexSize;
         uint32_t materialHandle;
     
-        glm::mat4x4 modelTransform; 
-        
-        BufferRegion uniformsRange;
+        glm::mat4x4 modelTransform;
+        uint32_t imageId;
+                
+        BufferRegion transformsRange;
+        BufferRegion textureIds;
     };
 
     struct DrawContext {
         BufferRegion mainViewCamera;
         ResourceRef<Image> output;
         ResourceRef<Image> depth;
+        ResourceRefs<Image>& colorTextures;
         ResourceRef<Buffer> vertexBuffer;
         ResourceRef<Buffer> indexBuffer;
+        ResourceRef<Sampler> linearSampler;
         std::vector<ModelData>& models;
         RenderContext& context;
     };
@@ -50,16 +54,18 @@ class Scene {
     ResourceRef<Buffer> m_vertexBuffer;
     ResourceRef<Buffer> m_indexBuffer;
     ResourceRef<Image> m_depthBuffer;
+    ResourceRefs<Image> m_images;
+    ResourceRef<Sampler> m_linearSampler;
 
     std::vector<ModelData> m_models;
     std::vector<MaterialPass> m_passes;
 
-    template<typename Attachments, typename... Bindings>
+    template<typename Attachments, typename... Bindings, typename Func>
     static void QueueDrawModels(
-        GraphicsNode<Attachments, Transforms, Bindings...>& node, 
+        GraphicsNode<Attachments, Bindings...>& node, 
         const DrawContext& drawContext,
         std::vector<uint32_t>& models, 
-        const Bindings&... values
+        Func&& getBindings
     ) {
         
         node.SetIndexBuffer(drawContext.indexBuffer, VkIndexType::VK_INDEX_TYPE_UINT32);
@@ -69,16 +75,18 @@ class Scene {
         for (uint32_t index: models) {
             ModelData model = drawContext.models[index];
 
-            Transforms t = Transforms {
-                .camera = drawContext.mainViewCamera,
-                .model = model.uniformsRange
-            };
+            std::tuple<Bindings...> parameters = getBindings(model, drawContext);
 
+            ShaderDynamicState state = {};
             if (i++ == 0) {
-                node.SetBindings(t, values...);
+                std::apply([&](auto... args) {node.SetBindings(args...);}, parameters);
+            }
+            else {
+                ShaderDynamicState state = std::apply([&](auto... args) -> ShaderDynamicState {
+                    return drawContext.context.Get<Descriptors>().GatherDynamicState(args...);
+                }, parameters);
             }
 
-            ShaderDynamicState state = drawContext.context.Get<Descriptors>().GatherDynamicState(t, values...);
 
             node.AddDrawParameters(DrawParameters{
                 model.indexSize, model.indexOffset, state
@@ -99,6 +107,9 @@ class Scene {
         m_depthBuffer = resources.CreateImage(ImageDescription(materialDatabase.depthFormat, 
             ImageUsage::DepthStencil | ImageUsage::TransferDst, extents));
         resources.GiveName(m_depthBuffer, "depth buffer");
+
+        m_linearSampler = resources.CreateSampler(SamplerFilter::LINEAR, SamplerAddressMode::CLAMP);
+        m_images.push_back(resources.LoadImageResource(ImageUsage::Sampled, "textures/viking_room.png", VK_FORMAT_R8G8B8A8_UNORM));
     }
 
     void PopulateScene() {
@@ -106,6 +117,7 @@ class Scene {
         uint32_t defaultColorMaterial = AddMaterial(&DefaultColorMaterial);
         
         uint32_t viking_room = AddObject("models/viking_room.obj", defaultColorMaterial);
+        m_models[viking_room].imageId = 0;
     }
 
     CameraData UpdateCameraPosition() {
@@ -130,8 +142,11 @@ public:
 
     static void DefaultColorMaterial(Scene& scene, const DrawContext& drawContext, MaterialPass& material) {
 
-        auto& node = drawContext.context.Get<RenderGraph>().AddNode<GraphicsNode<DefaultColorAttachments, Transforms>>(
-            scene.materialDatabase.GetPipeline(PipelineType::DefaultColor));
+        auto& node = drawContext.context.Get<RenderGraph>().AddNode<GraphicsNode<
+            DefaultColorAttachments, 
+            Transforms,
+            Textures
+        >>(scene.materialDatabase.GetPipeline(PipelineType::DefaultColor));
 
         node.SetName("Default Color Node");
         node.SetAttachments(
@@ -141,7 +156,22 @@ public:
             }
         );
         
-        Scene::QueueDrawModels(node, drawContext, material.models);
+        Scene::QueueDrawModels(node, drawContext, material.models, 
+            [](const ModelData& model, const DrawContext& context) -> std::tuple<Transforms, Textures> {
+
+            Transforms transforms {
+                .camera = context.mainViewCamera,
+                .model = model.transformsRange
+            };
+
+            Textures textures {
+                .textureIds = model.textureIds,
+                .colorTexture = context.colorTextures[0],
+                .colorTexture_sampler = context.linearSampler
+            };
+
+            return {transforms, textures};
+        });
     }
     
     Scene(RenderContext& context): 
@@ -191,7 +221,8 @@ public:
 
         
         for (ModelData& model : m_models) {
-            model.uniformsRange = m_renderContext.Get<DynamicUniforms>().Allocate(model.modelTransform);
+            model.transformsRange = m_renderContext.Get<DynamicUniforms>().Allocate(model.modelTransform);
+            model.textureIds = m_renderContext.Get<DynamicUniforms>().Allocate(model.imageId);
         }
     }
 
@@ -207,8 +238,10 @@ public:
             .mainViewCamera = m_renderContext.Get<DynamicUniforms>().Allocate(UpdateCameraPosition()),
             .output = output,
             .depth = m_depthBuffer,
+            .colorTextures = m_images,
             .vertexBuffer = m_vertexBuffer,
             .indexBuffer = m_indexBuffer,
+            .linearSampler = m_linearSampler,
             .models = m_models,
             .context = m_renderContext
         };

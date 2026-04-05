@@ -10,6 +10,12 @@ DYNAMIC_UNIFORM(camera, 0, Stage::Vertex) \
 DYNAMIC_UNIFORM(model, 1, Stage::Vertex)
 #include <gen_bindings.h>
 
+#define BLOCK_NAME Textures
+#define BLOCK \
+DYNAMIC_UNIFORM(textureIds, 0, Stage::Fragment) \
+IMAGE_SAMPLER(colorTexture, 1, Stage::Fragment)
+#include <gen_bindings.h>
+
 #define BLOCK_NAME DefaultColorAttachments
 #define BLOCK \
 COLOR(color, LoadOp::Load) \
@@ -65,6 +71,7 @@ private:
             .Get<GraphicsFeature>().NewGraphicsPipeline()
             .AddVertex<Vertex>()
             .AddLayout<Transforms>()
+            .AddLayout<Textures>()
             .SetAttachments<DefaultColorAttachments>(DefaultColorAttachments::Formats{
                 .color = m_renderContext.Get<PresentFeature>().swapChain->format,
                 .depth = depthFormat
