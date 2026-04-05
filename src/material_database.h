@@ -22,7 +22,13 @@ COLOR(color, LoadOp::Load) \
 DEPTH(depth, LoadOp::Load) 
 #include <gen_attachments.h>
 
+#define BLOCK_NAME DepthOnlyAttachments
+#define BLOCK \
+DEPTH(depth, LoadOp::Load)
+#include <gen_attachments.h>
+
 enum struct PipelineType {
+    DepthOnly,
     DefaultColor
 };
 
@@ -58,6 +64,8 @@ private:
         switch (type) {
             case PipelineType::DefaultColor:
                 return CreateDefaultColor();
+            case PipelineType::DepthOnly:
+                return CreateDepthPrepass();
             default:
                 ASSERT_MSG(false, "unknown pipeline type");
         }
@@ -78,6 +86,25 @@ private:
             })
             .AddShaderStage(vertexBin)
             .AddShaderStage(fragmentBin)
+            .SetDepthWriteEnabled(false)
+            .SetDepthCompareOp(VkCompareOp::VK_COMPARE_OP_EQUAL)
+            .SetCullMode(VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT, VkFrontFace::VK_FRONT_FACE_COUNTER_CLOCKWISE)
+            .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_VIEWPORT)
+            .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_SCISSOR)
+            .Build();
+    }
+
+    Ref<GraphicsPipeline> CreateDepthPrepass() {
+        ShaderBinary vertexBin = m_renderContext.Get<ShaderLoader>().Get("shaders/basic.vert", Stage::Vertex);
+
+        return m_renderContext
+            .Get<GraphicsFeature>().NewGraphicsPipeline()
+            .AddVertex<Vertex>()
+            .AddLayout<Transforms>()
+            .SetAttachments<DepthOnlyAttachments>(DepthOnlyAttachments::Formats{
+                .depth = depthFormat
+            })
+            .AddShaderStage(vertexBin)
             .SetCullMode(VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT, VkFrontFace::VK_FRONT_FACE_COUNTER_CLOCKWISE)
             .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_VIEWPORT)
             .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_SCISSOR)

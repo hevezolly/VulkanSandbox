@@ -17,7 +17,6 @@ class Scene {
     struct ModelData {
         uint32_t indexOffset;
         uint32_t indexSize;
-        uint32_t materialHandle;
     
         glm::mat4x4 modelTransform;
         uint32_t imageId;
@@ -59,6 +58,9 @@ class Scene {
 
     std::vector<ModelData> m_models;
     std::vector<MaterialPass> m_passes;
+
+    uint32_t depthPass;
+    uint32_t colorPass;
 
     template<typename Attachments, typename... Bindings, typename Func>
     static void QueueDrawModels(
@@ -114,9 +116,10 @@ class Scene {
 
     void PopulateScene() {
 
-        uint32_t defaultColorMaterial = AddMaterial(&DefaultColorMaterial);
+        depthPass = AddMaterial(&DepthOnlyPass);
+        colorPass = AddMaterial(&DefaultColorPass);
         
-        uint32_t viking_room = AddObject("models/viking_room.obj", defaultColorMaterial);
+        uint32_t viking_room = AddObject("models/viking_room.obj", {depthPass, colorPass});
         m_models[viking_room].imageId = 0;
     }
 
@@ -139,8 +142,33 @@ public:
 
     MaterialDatabase materialDatabase;
 
+    static void DepthOnlyPass(Scene& scene, const DrawContext& drawContext, MaterialPass& material) {
 
-    static void DefaultColorMaterial(Scene& scene, const DrawContext& drawContext, MaterialPass& material) {
+        auto& node = drawContext.context.Get<RenderGraph>().AddNode<GraphicsNode<
+            DepthOnlyAttachments, 
+            Transforms
+        >>(scene.materialDatabase.GetPipeline(PipelineType::DepthOnly));
+
+        node.SetName("Depth only node");
+        node.SetAttachments(
+            DepthOnlyAttachments{
+                .depth = drawContext.depth
+            }
+        );
+        
+        Scene::QueueDrawModels(node, drawContext, material.models, 
+            [](const ModelData& model, const DrawContext& context) {
+
+            Transforms transforms {
+                .camera = context.mainViewCamera,
+                .model = model.transformsRange
+            };
+            return std::tuple {transforms};
+        });
+    }
+
+
+    static void DefaultColorPass(Scene& scene, const DrawContext& drawContext, MaterialPass& material) {
 
         auto& node = drawContext.context.Get<RenderGraph>().AddNode<GraphicsNode<
             DefaultColorAttachments, 
@@ -157,7 +185,7 @@ public:
         );
         
         Scene::QueueDrawModels(node, drawContext, material.models, 
-            [](const ModelData& model, const DrawContext& context) -> std::tuple<Transforms, Textures> {
+            [](const ModelData& model, const DrawContext& context) {
 
             Transforms transforms {
                 .camera = context.mainViewCamera,
@@ -170,7 +198,7 @@ public:
                 .colorTexture_sampler = context.linearSampler
             };
 
-            return {transforms, textures};
+            return std::tuple {transforms, textures};
         });
     }
     
@@ -194,7 +222,7 @@ public:
         return materialId;
     }
 
-    uint32_t AddObject(const char* path, uint32_t materialHandle) {
+    uint32_t AddObject(const char* path, std::initializer_list<uint32_t> materialPasses) {
         
         uint32_t indexStart = m_indices.size();
         loadModel(m_renderContext, path, m_vertices, m_indices);
@@ -206,19 +234,23 @@ public:
         m_models.push_back(ModelData {
             .indexOffset = m_nextObjectPosition,
             .indexSize = indexSize,
-            .materialHandle = materialHandle,
             .modelTransform = glm::identity<glm::mat4x4>()
         });
 
-        m_passes[materialHandle].models.push_back(modelIndex);
+        for (uint32_t material : materialPasses) {
+            m_passes[material].models.push_back(modelIndex);
+        }
 
         m_nextObjectPosition += indexSize;
 
         return modelIndex;
     }
 
-    void OnBeginFrame() {
+    void DrawPass(DrawContext& drawContext, uint32_t passId) {
+        m_passes[passId].setUpDraw(*this, drawContext, m_passes[passId]);
+    }
 
+    void OnBeginFrame() {
         
         for (ModelData& model : m_models) {
             model.transformsRange = m_renderContext.Get<DynamicUniforms>().Allocate(model.modelTransform);
@@ -247,11 +279,10 @@ public:
         };
 
         m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(m_depthBuffer);
+        DrawPass(drawContext, depthPass);
+        
         m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(output);
-
-        for (MaterialPass& pass: m_passes) {
-            pass.setUpDraw(*this, drawContext, pass);
-        }
+        DrawPass(drawContext, colorPass);
     }
 
     void OnEngFrame() {

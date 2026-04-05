@@ -42,7 +42,7 @@ int main() {
             RenderGraph& graph = context.Get<RenderGraph>();
             graph.AddNode<ImguiNode>(drawImage).SetName("ui node");
             graph.AddNode<PresentNode>(drawImage).SetName("present node");
-            graph.Run();
+            graph.Debug();
 
             scene.OnEngFrame();
         }
