@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(VulkanSandbox LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 23)
+
 # Disable examples when building as dependency
 set(VULKAN_ENGINE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 # Optionally control UI

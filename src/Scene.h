@@ -30,13 +30,15 @@ class Scene {
         ResourceRef<Image> depth;
         ResourceRef<Buffer> vertexBuffer;
         ResourceRef<Buffer> indexBuffer;
+        std::vector<ModelData>& models;
+        RenderContext& context;
     };
 
     struct MaterialPass {
 
         std::vector<uint32_t> models;
         
-        void (*setUpDraw)(RenderContext&, Scene&, const DrawContext&, MaterialPass&);
+        void (*setUpDraw)(Scene&, const DrawContext&, MaterialPass&);
     };
 
     RenderContext& m_renderContext;
@@ -65,7 +67,7 @@ class Scene {
 
         uint32_t i = 0;
         for (uint32_t index: models) {
-            ModelData model = m_models[index];
+            ModelData model = drawContext.models[index];
 
             Transforms t = Transforms {
                 .camera = drawContext.mainViewCamera,
@@ -76,7 +78,7 @@ class Scene {
                 node.SetBindings(t, values...);
             }
 
-            ShaderDynamicState state = m_renderContext.Get<Descriptors>().GatherDynamicState(t, values...);
+            ShaderDynamicState state = drawContext.context.Get<Descriptors>().GatherDynamicState(t, values...);
 
             node.AddDrawParameters(DrawParameters{
                 model.indexSize, model.indexOffset, state
@@ -94,7 +96,8 @@ class Scene {
         resources.GiveName(m_indexBuffer, "index buffer");
         
         auto extents = m_renderContext.Get<PresentFeature>().swapChain->extent;
-        m_depthBuffer = resources.CreateImage(ImageDescription(materialDatabase.depthFormat, ImageUsage::DepthStencil, extents));
+        m_depthBuffer = resources.CreateImage(ImageDescription(materialDatabase.depthFormat, 
+            ImageUsage::DepthStencil | ImageUsage::TransferDst, extents));
         resources.GiveName(m_depthBuffer, "depth buffer");
     }
 
@@ -125,9 +128,9 @@ public:
     MaterialDatabase materialDatabase;
 
 
-    static void DefaultColorMaterial(RenderContext& context, Scene& scene, const DrawContext& drawContext, MaterialPass& material) {
+    static void DefaultColorMaterial(Scene& scene, const DrawContext& drawContext, MaterialPass& material) {
 
-        auto& node = context.Get<RenderGraph>().AddNode<GraphicsNode<DefaultColorAttachments, Transforms>>(
+        auto& node = drawContext.context.Get<RenderGraph>().AddNode<GraphicsNode<DefaultColorAttachments, Transforms>>(
             scene.materialDatabase.GetPipeline(PipelineType::DefaultColor));
 
         node.SetName("Default Color Node");
@@ -141,12 +144,15 @@ public:
         Scene::QueueDrawModels(node, drawContext, material.models);
     }
     
-    Scene(RenderContext& context): m_renderContext(context), materialDatabase(context) {
+    Scene(RenderContext& context): 
+        m_renderContext(context), materialDatabase(context),
+        m_nextObjectPosition(0), m_indices(), m_vertices(), m_models(), m_passes()
+    {
         PopulateScene();
         InitializeResources();
     }
     
-    uint32_t AddMaterial(void (*setUpDraw)(RenderContext&, Scene&, const DrawContext&, MaterialPass&)) {
+    uint32_t AddMaterial(void (*setUpDraw)(Scene&, const DrawContext&, MaterialPass&)) {
 
         uint32_t materialId = m_passes.size();
 
@@ -163,7 +169,7 @@ public:
         uint32_t indexStart = m_indices.size();
         loadModel(m_renderContext, path, m_vertices, m_indices);
         
-        uint32_t indexSize = indexStart - m_indices.size();
+        uint32_t indexSize = m_indices.size() - indexStart;
         
         uint32_t modelIndex = m_models.size();
 
@@ -182,22 +188,36 @@ public:
     }
 
     void OnBeginFrame() {
+
+        
+        for (ModelData& model : m_models) {
+            model.uniformsRange = m_renderContext.Get<DynamicUniforms>().Allocate(model.modelTransform);
+        }
     }
 
     void OnPrepareDraw(ResourceRef<Image> output) {
 
-        if (m_depthBuffer)
+        if (m_depthBuffer->description.width != output->description.width ||
+            m_depthBuffer->description.height != output->description.height) {
+
+            m_depthBuffer = m_renderContext.Get<Resources>().Resize(m_depthBuffer, {output->description.width, output->description.height});
+        }
 
         DrawContext drawContext {
             .mainViewCamera = m_renderContext.Get<DynamicUniforms>().Allocate(UpdateCameraPosition()),
             .output = output,
-            .depth = ,
+            .depth = m_depthBuffer,
             .vertexBuffer = m_vertexBuffer,
             .indexBuffer = m_indexBuffer,
+            .models = m_models,
+            .context = m_renderContext
         };
 
+        m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(m_depthBuffer);
+        m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(output);
+
         for (MaterialPass& pass: m_passes) {
-            pass.setUpDraw(m_renderContext, *this, pass);
+            pass.setUpDraw(*this, drawContext, pass);
         }
     }
 

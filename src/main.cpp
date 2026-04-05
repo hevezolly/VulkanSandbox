@@ -29,18 +29,17 @@ int main() {
     {
         Scene scene(context);
 
+
         while (!glfwWindowShouldClose(context.Get<PresentFeature>().window->pWindow)) {
             glfwPollEvents();
 
             context.BeginFrame();
             
             ResourceRef<Image> drawImage = context.Get<PresentFeature>().AcquireNextImage();
-
             scene.OnBeginFrame();
             scene.OnPrepareDraw(drawImage);
 
             RenderGraph& graph = context.Get<RenderGraph>();
-
             graph.AddNode<ImguiNode>(drawImage).SetName("ui node");
             graph.AddNode<PresentNode>(drawImage).SetName("present node");
             graph.Run();
@@ -49,5 +48,6 @@ int main() {
         }
     }
 
+    std::cout << "finish" << std::endl;
     return 0;
 }

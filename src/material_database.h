@@ -2,7 +2,7 @@
 
 #include <vulkan_engine.h>
 #include <unordered_map>
-#include <model_loader.h>
+#include "model_loader.h"
 
 #define BLOCK_NAME Transforms
 #define BLOCK \
@@ -71,6 +71,7 @@ private:
             })
             .AddShaderStage(vertexBin)
             .AddShaderStage(fragmentBin)
+            .SetCullMode(VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT, VkFrontFace::VK_FRONT_FACE_COUNTER_CLOCKWISE)
             .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_VIEWPORT)
             .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_SCISSOR)
             .Build();

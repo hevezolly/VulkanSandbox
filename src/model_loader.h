@@ -1,4 +1,5 @@
 #pragma once
+#define TINYOBJLOADER_DISABLE_FAST_FLOAT
 #include "tiny_obj_loader.h"
 #include <render_context.h>
 #include <registry.h>
