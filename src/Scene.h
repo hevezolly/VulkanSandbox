@@ -6,6 +6,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include "model_loader.h"
 #include "material_database.h"
+#include "draw_context.h"
 
 class Scene {
 
@@ -14,37 +15,14 @@ class Scene {
         glm::mat4x4 projection;
     };
 
-    struct ModelData {
-        uint32_t indexOffset;
-        uint32_t indexSize;
-    
-        glm::mat4x4 modelTransform;
-        uint32_t imageId;
-                
-        BufferRegion transformsRange;
-        BufferRegion textureIds;
-    };
-
-    struct DrawContext {
-        BufferRegion mainViewCamera;
-        ResourceRef<Image> output;
-        ResourceRef<Image> depth;
-        ResourceRefs<Image>& colorTextures;
-        ResourceRef<Buffer> vertexBuffer;
-        ResourceRef<Buffer> indexBuffer;
-        ResourceRef<Sampler> linearSampler;
-        std::vector<ModelData>& models;
-        RenderContext& context;
-    };
-
-    struct MaterialPass {
-
-        std::vector<uint32_t> models;
-        
-        void (*setUpDraw)(Scene&, const DrawContext&, MaterialPass&);
-    };
-
     RenderContext& m_renderContext;
+
+    LightsConfig m_lights {
+        .dirLightTransform = glm::identity<glm::mat4>(),
+        .dirLightDirection = {0.813, 0.366, 0.453, 0},
+        .dirLightColor = {1, 1, 1, 1},
+        .depthBias = 0.005
+    };
 
     uint32_t m_nextObjectPosition;
     std::vector<Vertex> m_vertices;
@@ -55,46 +33,18 @@ class Scene {
     ResourceRef<Image> m_depthBuffer;
     ResourceRefs<Image> m_images;
     ResourceRef<Sampler> m_linearSampler;
+    ResourceRef<Image> m_directShadowmap;
 
     std::vector<ModelData> m_models;
     std::vector<MaterialPass> m_passes;
 
     uint32_t depthPass;
     uint32_t colorPass;
+    uint32_t directShadowmapPass;
 
-    template<typename Attachments, typename... Bindings, typename Func>
-    static void QueueDrawModels(
-        GraphicsNode<Attachments, Bindings...>& node, 
-        const DrawContext& drawContext,
-        std::vector<uint32_t>& models, 
-        Func&& getBindings
-    ) {
-        
-        node.SetIndexBuffer(drawContext.indexBuffer, VkIndexType::VK_INDEX_TYPE_UINT32);
-        node.AddVertexBuffer(drawContext.vertexBuffer);
+    DebugData m_debugData;
 
-        uint32_t i = 0;
-        for (uint32_t index: models) {
-            ModelData model = drawContext.models[index];
-
-            std::tuple<Bindings...> parameters = getBindings(model, drawContext);
-
-            ShaderDynamicState state = {};
-            if (i++ == 0) {
-                std::apply([&](auto... args) {node.SetBindings(args...);}, parameters);
-            }
-            else {
-                ShaderDynamicState state = std::apply([&](auto... args) -> ShaderDynamicState {
-                    return drawContext.context.Get<Descriptors>().GatherDynamicState(args...);
-                }, parameters);
-            }
-
-
-            node.AddDrawParameters(DrawParameters{
-                model.indexSize, model.indexOffset, state
-            });
-        }
-    }
+    float size = 2.0f;
 
     void InitializeResources() {
         Resources& resources = m_renderContext.Get<Resources>();
@@ -107,19 +57,26 @@ class Scene {
         
         auto extents = m_renderContext.Get<PresentFeature>().swapChain->extent;
         m_depthBuffer = resources.CreateImage(ImageDescription(materialDatabase.depthFormat, 
-            ImageUsage::DepthStencil | ImageUsage::TransferDst, extents));
+            ImageUsage::DepthStencil | ImageUsage::TransferDst | ImageUsage::Sampled, extents));
         resources.GiveName(m_depthBuffer, "depth buffer");
 
         m_linearSampler = resources.CreateSampler(SamplerFilter::LINEAR, SamplerAddressMode::CLAMP);
         m_images.push_back(resources.LoadImageResource(ImageUsage::Sampled, "textures/viking_room.png", VK_FORMAT_R8G8B8A8_UNORM));
+        m_directShadowmap = resources.CreateImage(ImageDescription(
+            materialDatabase.depthFormat,
+            ImageUsage::DepthStencil | ImageUsage::Sampled | ImageUsage::TransferDst, {500, 500}
+        ));
+        resources.GiveName(m_directShadowmap, "direct shadowmap");
     }
 
     void PopulateScene() {
 
-        depthPass = AddMaterial(&DepthOnlyPass);
-        colorPass = AddMaterial(&DefaultColorPass);
+        depthPass = AddMaterial(&MaterialDatabase::DepthOnlyPass);
+        colorPass = AddMaterial(&MaterialDatabase::DefaultColorPass);
+        directShadowmapPass = AddMaterial(&MaterialDatabase::DirectShadowmapPass);
         
-        uint32_t viking_room = AddObject("models/viking_room.obj", {depthPass, colorPass});
+        uint32_t viking_room = AddObject("models/viking_room.obj", 
+            {depthPass, colorPass, directShadowmapPass});
         m_models[viking_room].imageId = 0;
     }
 
@@ -134,73 +91,52 @@ class Scene {
         d.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         d.projection = glm::perspective(glm::radians(45.0f), swapChain->extent.width / (float) swapChain->extent.height, 0.1f, 10.0f);
         d.projection[1][1] *= -1;
-
+        
         return d;
-    } 
+    }
+
+    glm::mat4 VulkanOrtho(float left, float right, float bottom, float top, float n, float f) {
+        glm::mat4 m(1.0f);
+        m[0][0] =  2.0f / (right - left);
+        m[1][1] =  2.0f / (bottom - top); // bottom/top swapped = Y flip for Vulkan
+        m[2][2] =  -1.0f / (f - n);   // [0,1] depth range
+        m[3][0] = -(right + left)   / (right - left);
+        m[3][1] = -(bottom + top)   / (bottom - top);
+        m[3][2] = n / (f - n);
+        m[2][3] *= -1;
+        return m;
+    };
+
+    CameraData GetShadowmapViewProjection() {
+        CameraData result;
+        SwapChain* swapChain = m_renderContext.Get<PresentFeature>().swapChain;
+        
+        result.view = glm::lookAt(glm::vec3(m_lights.dirLightDirection) * glm::vec3(2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        result.projection = VulkanOrtho(-size, size, -size, size, 0.1f, 10.0f);
+        return result;
+    }
+
+    void DispalyUI() {
+        ImGui::SetNextWindowCollapsed(true, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowContentSize({200, 300});
+
+        if (ImGui::Begin("Debug")) {
+            if (ImGui::SliderFloat3("light direction", &m_lights.dirLightDirection[0], -1, 1)) {
+                m_lights.dirLightDirection = glm::vec4(
+                glm::normalize(glm::vec3(m_lights.dirLightDirection)), 0);
+            }
+
+            ImGui::ColorPicker3("light color", &m_lights.dirLightColor[0]);
+            ImGui::SliderFloat("depth bias", &m_lights.depthBias, 0.0f, 0.01f, "%.5");
+
+            ImGui::DragFloat("size", &size);
+        }
+        ImGui::End();        
+    }
 
 public:
 
     MaterialDatabase materialDatabase;
-
-    static void DepthOnlyPass(Scene& scene, const DrawContext& drawContext, MaterialPass& material) {
-
-        auto& node = drawContext.context.Get<RenderGraph>().AddNode<GraphicsNode<
-            DepthOnlyAttachments, 
-            Transforms
-        >>(scene.materialDatabase.GetPipeline(PipelineType::DepthOnly));
-
-        node.SetName("Depth only node");
-        node.SetAttachments(
-            DepthOnlyAttachments{
-                .depth = drawContext.depth
-            }
-        );
-        
-        Scene::QueueDrawModels(node, drawContext, material.models, 
-            [](const ModelData& model, const DrawContext& context) {
-
-            Transforms transforms {
-                .camera = context.mainViewCamera,
-                .model = model.transformsRange
-            };
-            return std::tuple {transforms};
-        });
-    }
-
-
-    static void DefaultColorPass(Scene& scene, const DrawContext& drawContext, MaterialPass& material) {
-
-        auto& node = drawContext.context.Get<RenderGraph>().AddNode<GraphicsNode<
-            DefaultColorAttachments, 
-            Transforms,
-            Textures
-        >>(scene.materialDatabase.GetPipeline(PipelineType::DefaultColor));
-
-        node.SetName("Default Color Node");
-        node.SetAttachments(
-            DefaultColorAttachments{
-                .color = drawContext.output,
-                .depth = drawContext.depth
-            }
-        );
-        
-        Scene::QueueDrawModels(node, drawContext, material.models, 
-            [](const ModelData& model, const DrawContext& context) {
-
-            Transforms transforms {
-                .camera = context.mainViewCamera,
-                .model = model.transformsRange
-            };
-
-            Textures textures {
-                .textureIds = model.textureIds,
-                .colorTexture = context.colorTextures[0],
-                .colorTexture_sampler = context.linearSampler
-            };
-
-            return std::tuple {transforms, textures};
-        });
-    }
     
     Scene(RenderContext& context): 
         m_renderContext(context), materialDatabase(context),
@@ -210,7 +146,7 @@ public:
         InitializeResources();
     }
     
-    uint32_t AddMaterial(void (*setUpDraw)(Scene&, const DrawContext&, MaterialPass&)) {
+    uint32_t AddMaterial(void (*setUpDraw)(MaterialDatabase&, const DrawContext&, MaterialPass&)) {
 
         uint32_t materialId = m_passes.size();
 
@@ -247,13 +183,19 @@ public:
     }
 
     void DrawPass(DrawContext& drawContext, uint32_t passId) {
-        m_passes[passId].setUpDraw(*this, drawContext, m_passes[passId]);
+        m_passes[passId].setUpDraw(materialDatabase, drawContext, m_passes[passId]);
     }
 
     void OnBeginFrame() {
+
+        DispalyUI();
         
         for (ModelData& model : m_models) {
-            model.transformsRange = m_renderContext.Get<DynamicUniforms>().Allocate(model.modelTransform);
+            ModelTransforms transforms {
+                model.modelTransform,
+                glm::inverse(model.modelTransform)
+            };
+            model.transformsRange = m_renderContext.Get<DynamicUniforms>().Allocate(transforms);
             model.textureIds = m_renderContext.Get<DynamicUniforms>().Allocate(model.imageId);
         }
     }
@@ -266,10 +208,20 @@ public:
             m_depthBuffer = m_renderContext.Get<Resources>().Resize(m_depthBuffer, {output->description.width, output->description.height});
         }
 
+        CameraData shadowmapCamera = GetShadowmapViewProjection();
+        BufferRegion directShadowmapRange = m_renderContext.Get<DynamicUniforms>()
+            .Allocate(shadowmapCamera);
+        BufferRegion mainViewCameraRange = m_renderContext.Get<DynamicUniforms>()
+            .Allocate(UpdateCameraPosition());
+        
+        m_lights.dirLightTransform = shadowmapCamera.projection * shadowmapCamera.view;
+
         DrawContext drawContext {
-            .mainViewCamera = m_renderContext.Get<DynamicUniforms>().Allocate(UpdateCameraPosition()),
+            .mainViewCamera = mainViewCameraRange,
+            .lights = m_renderContext.Get<DynamicUniforms>().Allocate(m_lights),
             .output = output,
             .depth = m_depthBuffer,
+            .directShadowmap = m_directShadowmap,
             .colorTextures = m_images,
             .vertexBuffer = m_vertexBuffer,
             .indexBuffer = m_indexBuffer,
@@ -280,6 +232,30 @@ public:
 
         m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(m_depthBuffer);
         DrawPass(drawContext, depthPass);
+
+        drawContext.mainViewCamera = directShadowmapRange;
+        drawContext.depth = m_directShadowmap;
+        m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(m_directShadowmap);
+        DrawPass(drawContext, directShadowmapPass);
+
+        // auto& node = m_renderContext.Get<RenderGraph>().AddNode<
+        //     GraphicsNode<ColorOnlyAttachments, FullScreenQuad>>(
+        //         materialDatabase.GetPipeline(PipelineType::FullScreenQuad));
+        
+        // node.SetAttachments(ColorOnlyAttachments {
+        //     .color = output
+        // });
+        // node.SetBindings(
+        //     FullScreenQuad {
+        //         .image = m_directShadowmap,
+        //         .image_sampler = m_linearSampler,
+        //         .data = m_renderContext.Get<DynamicUniforms>().Allocate(m_debugData)
+        //     }
+        // );
+        // node.AddDrawParameters(DrawParameters(6, 0));
+
+        drawContext.depth = m_depthBuffer;
+        drawContext.mainViewCamera = mainViewCameraRange;
         
         m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(output);
         DrawPass(drawContext, colorPass);

@@ -9,6 +9,7 @@
 #define BLOCK_NAME Vertex
 #define BLOCK \
 VEC3(pos) \
+VEC3(normal) \
 VEC3(color) \
 VEC2(texCoord)
 #include <gen_vertex_data.h>
@@ -46,6 +47,12 @@ void loadModel(RenderContext& context, const char* path, std::vector<Vertex>& ve
                 attrib.vertices[3 * index.vertex_index + 0],
                 attrib.vertices[3 * index.vertex_index + 1],
                 attrib.vertices[3 * index.vertex_index + 2]
+            };
+
+            vertex.normal = {
+                attrib.normals[3 * index.normal_index + 0],
+                attrib.normals[3 * index.normal_index + 1],
+                attrib.normals[3 * index.normal_index + 2]
             };
 
             vertex.texCoord = {

@@ -1,0 +1,68 @@
+#pragma once
+#include <vulkan_engine.h>
+
+#define BLOCK_NAME Transforms
+#define BLOCK \
+DYNAMIC_UNIFORM(camera, 0, Stage::Vertex | Stage::Fragment) \
+DYNAMIC_UNIFORM(model, 1, Stage::Vertex)
+#include <gen_bindings.h>
+
+struct ModelTransforms {
+    glm::mat4x4 transform;
+    glm::mat4x4 transformInv;
+};
+
+#define BLOCK_NAME FullScreenQuad
+#define BLOCK \
+IMAGE_SAMPLER(image, 0, Stage::Fragment) \
+DYNAMIC_UNIFORM(data, 1, Stage::Fragment)
+#include <gen_bindings.h>
+
+struct DebugData {
+    float minValue;
+    float maxValue;
+};
+
+#define BLOCK_NAME Textures
+#define BLOCK \
+DYNAMIC_UNIFORM(textureIds, 0, Stage::Fragment) \
+IMAGE_SAMPLER(colorTexture, 1, Stage::Fragment)
+#include <gen_bindings.h>
+
+#define BLOCK_NAME Lights
+#define BLOCK \
+DYNAMIC_UNIFORM(lightsConfig, 0, Stage::Fragment) \
+IMAGE_SAMPLER(directShadowmap, 1, Stage::Fragment)
+#include <gen_bindings.h>
+
+struct LightsConfig {
+    glm::mat4x4 dirLightTransform;
+    glm::vec4 dirLightDirection;
+    glm::vec4 dirLightColor;
+    float depthBias;
+};
+
+struct ModelData {
+    uint32_t indexOffset;
+    uint32_t indexSize;
+
+    glm::mat4x4 modelTransform;
+    uint32_t imageId;
+            
+    BufferRegion transformsRange;
+    BufferRegion textureIds;
+};
+
+struct DrawContext {
+    BufferRegion mainViewCamera;
+    BufferRegion lights;
+    ResourceRef<Image> output;
+    ResourceRef<Image> depth;
+    ResourceRef<Image> directShadowmap;
+    ResourceRefs<Image>& colorTextures;
+    ResourceRef<Buffer> vertexBuffer;
+    ResourceRef<Buffer> indexBuffer;
+    ResourceRef<Sampler> linearSampler;
+    std::vector<ModelData>& models;
+    RenderContext& context;
+};
