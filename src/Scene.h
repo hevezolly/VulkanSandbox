@@ -15,13 +15,18 @@ class Scene {
         glm::mat4x4 projection;
     };
 
+    glm::vec3 m_cameraPosition = {2, 2, 2};
+    glm::vec3 m_cameraForward = -m_cameraPosition;
+    float m_cameraVelocity = 0.1f;
+    float m_cameraRotationVelocity = 0.1f;
+
     RenderContext& m_renderContext;
 
     LightsConfig m_lights {
         .dirLightTransform = glm::identity<glm::mat4>(),
         .dirLightDirection = {0.813, 0.366, 0.453, 0},
         .dirLightColor = {1, 1, 1, 1},
-        .depthBias = 0.005
+        .depthBias = 0.0005f
     };
 
     uint32_t m_nextObjectPosition;
@@ -80,15 +85,26 @@ class Scene {
         m_models[viking_room].imageId = 0;
     }
 
+    glm::mat4 viewMatrix(glm::vec3 pos, glm::vec3 forward, glm::vec3 right, glm::vec3 up) {
+        // Remap axes:
+        // GLM X (right)    = your Y (right)
+        // GLM Y (up)       = your Z (up)
+        // GLM Z (backward) = your X (forward)  -- negated because GLM looks down -Z
+        glm::mat4 m(1.0f);
+        m[0][0] = right.x;    m[1][0] = right.y;    m[2][0] = right.z;    m[3][0] = -glm::dot(right,   pos);
+        m[0][1] = up.x;       m[1][1] = up.y;       m[2][1] = up.z;       m[3][1] = -glm::dot(up,      pos);
+        m[0][2] = -forward.x; m[1][2] = -forward.y; m[2][2] = -forward.z; m[3][2] = -glm::dot(-forward, pos);
+        m[0][3] = 0.0f;       m[1][3] = 0.0f;       m[2][3] = 0.0f;       m[3][3] = 1.0f;
+        return m;
+    }
+
     CameraData UpdateCameraPosition() {
-        static auto startTime = std::chrono::high_resolution_clock::now();
-
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
+    
         SwapChain* swapChain = m_renderContext.Get<PresentFeature>().swapChain;
         CameraData d;
-        d.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        glm::vec3 right = glm::cross(m_cameraForward, {0, 0, 1});
+        glm::vec3 up = glm::cross(right, m_cameraForward);
+        d.view = glm::lookAt(m_cameraPosition, m_cameraPosition + m_cameraForward, up);
         d.projection = glm::perspective(glm::radians(45.0f), swapChain->extent.width / (float) swapChain->extent.height, 0.1f, 10.0f);
         d.projection[1][1] *= -1;
         
@@ -120,14 +136,46 @@ class Scene {
         ImGui::SetNextWindowCollapsed(true, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowContentSize({200, 300});
 
+        m_cameraForward = glm::normalize(m_cameraForward);
+        glm::vec3 right = glm::cross(m_cameraForward, {0, 0, 1});
+        glm::vec3 up = glm::cross(right, m_cameraForward);
+
+        if (ImGui::IsKeyDown(ImGuiKey_W)) {
+            m_cameraPosition += m_cameraForward * m_cameraVelocity;
+        }
+
+        if (ImGui::IsKeyDown(ImGuiKey_S)) {
+            m_cameraPosition -= m_cameraForward * m_cameraVelocity;
+        }
+
+        if (ImGui::IsKeyDown(ImGuiKey_D)) {
+            m_cameraPosition += right * m_cameraVelocity;
+        }
+
+        if (ImGui::IsKeyDown(ImGuiKey_A)) {
+            m_cameraPosition -= right * m_cameraVelocity;
+        }
+
+        if (ImGui::IsKeyDown(ImGuiKey_Space)) {
+            m_cameraPosition += up * m_cameraVelocity;
+        }
+
+        if (ImGui::IsKeyDown(ImGuiKey_C)) {
+            m_cameraPosition -= up * m_cameraVelocity;
+        }
+        
+
         if (ImGui::Begin("Debug")) {
+
+            ImGui::SliderFloat3("camera pos", &m_cameraPosition[0], -2, 2);
+
             if (ImGui::SliderFloat3("light direction", &m_lights.dirLightDirection[0], -1, 1)) {
                 m_lights.dirLightDirection = glm::vec4(
                 glm::normalize(glm::vec3(m_lights.dirLightDirection)), 0);
             }
 
             ImGui::ColorPicker3("light color", &m_lights.dirLightColor[0]);
-            ImGui::SliderFloat("depth bias", &m_lights.depthBias, 0.0f, 0.01f, "%.5");
+            ImGui::InputFloat("depth bias", &m_lights.depthBias, 0.0001f, 0.001f, "%.5f");
 
             ImGui::DragFloat("size", &size);
         }
