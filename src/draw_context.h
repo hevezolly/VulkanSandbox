@@ -53,16 +53,22 @@ struct ModelData {
     BufferRegion textureIds;
 };
 
+struct ResourcesRefs {
+    ResourceRef<Sampler> linearSampler;
+    ResourceRef<Buffer> vertexBuffer;
+    ResourceRef<Buffer> indexBuffer;
+    ResourceRef<Image> depthBuffer;
+    ResourceRefs<Image> images;
+    ResourceRef<Image> directShadowmap;
+    ResourceRef<Image> skybox;
+};
+
 struct DrawContext {
     BufferRegion mainViewCamera;
     BufferRegion lights;
     ResourceRef<Image> output;
     ResourceRef<Image> depth;
-    ResourceRef<Image> directShadowmap;
-    ResourceRefs<Image>& colorTextures;
-    ResourceRef<Buffer> vertexBuffer;
-    ResourceRef<Buffer> indexBuffer;
-    ResourceRef<Sampler> linearSampler;
+    ResourcesRefs& resources;
     std::vector<ModelData>& models;
     RenderContext& context;
 };

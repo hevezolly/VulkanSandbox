@@ -28,18 +28,63 @@ enum struct PipelineType {
     FullScreenQuad,
 };
 
+enum struct ComputePipelineType {
+    GenerateSkybox,
+};
+
+struct PipelineKey {
+    TypeId typeId;
+    uint32_t index;
+
+    bool operator==(const PipelineKey& other) const {
+        return typeId == other.typeId && index == other.index;
+    }
+
+    bool operator!=(const PipelineKey& other) const {
+        return !(*this == other);
+    }
+};
+
+namespace std {
+    template <>
+    struct hash<PipelineKey> {
+        size_t operator()(const PipelineKey& _Keyval) const noexcept {
+            size_t seed = 0;
+            hash_combine(seed, _Keyval.typeId);
+            hash_combine(seed, _Keyval.index);
+            return seed;
+        }
+    };
+}
+
 struct MaterialDatabase;
 
-struct MaterialPass {
+struct Pass {
 
-    std::vector<uint32_t> models;
-    
-    void (*setUpDraw)(MaterialDatabase&, const DrawContext&, MaterialPass&);
+    Pass(): materialDatabase(nullptr) {}
+    Pass(RenderContext* context, MaterialDatabase* materialDatabase): context(context), materialDatabase(materialDatabase) {}
+
+    virtual ~Pass() {}
+
+protected:
+
+    virtual Ref<GraphicsPipeline> CreateGraphicsPipeline(uint32_t index) {ASSERT_MSG(false, "not implemented"); return Ref<GraphicsPipeline>::Null();}
+    virtual Ref<ComputePipeline> CreateComputePipeline(uint32_t index) {ASSERT_MSG(false, "not implemented"); return Ref<ComputePipeline>::Null();}
+
+    Ref<GraphicsPipeline> GetGraphicsPipeline(uint32_t index=0);
+
+    Ref<ComputePipeline> GetComputePipeline(uint32_t index=0);
+
+    MaterialDatabase* materialDatabase;
+    RenderContext* context;
 };
 
 struct MaterialDatabase
 {
-    std::unordered_map<PipelineType, Ref<GraphicsPipeline>> _pipelines;
+    std::unordered_map<PipelineKey, Ref<GraphicsPipeline>> _graphicsPipelines;
+    std::unordered_map<PipelineKey, Ref<ComputePipeline>> _compuePipelines;
+    VkFormat depthFormat;
+    RenderContext& m_renderContext;
 
     MaterialDatabase(RenderContext& renderContext): m_renderContext(renderContext) {
         depthFormat = renderContext.Get<Device>().SelectSupportedFormat(
@@ -48,101 +93,26 @@ struct MaterialDatabase
         VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
     }
 
-    Ref<GraphicsPipeline> GetPipeline(PipelineType pipeline) {
-        Ref<GraphicsPipeline> result = _pipelines[pipeline];
-        
-        if (result.isNull()) {
-            result = CreatePipeline(pipeline);
-            _pipelines[pipeline] = result;
-        }
-
-        return result;
+    void RegisterPipeline(Ref<GraphicsPipeline> pipeline, PipelineKey key) {
+        _graphicsPipelines[key] = pipeline;
     }
 
-    static void DepthOnlyPass(MaterialDatabase& materialDatabase, const DrawContext& drawContext, MaterialPass& material) {
-        GenericDepthPass(materialDatabase, drawContext, material, PipelineType::DepthOnly);
+    void RegisterPipeline(Ref<ComputePipeline> pipeline, PipelineKey key) {
+        _compuePipelines[key] = pipeline;
     }
 
-    static void DirectShadowmapPass(MaterialDatabase& materialDatabase, const DrawContext& drawContext, MaterialPass& material) {
-        GenericDepthPass(materialDatabase, drawContext, material, PipelineType::DepthShadowmap);
+    Ref<GraphicsPipeline> GetGraphicsPipeline(PipelineKey key) {
+        return _graphicsPipelines[key];
     }
 
-
-    static void DefaultColorPass(MaterialDatabase& materialDatabase, const DrawContext& drawContext, MaterialPass& material) {
-
-        auto& node = drawContext.context.Get<RenderGraph>().AddNode<GraphicsNode<
-            DefaultColorAttachments, 
-            Transforms,
-            Textures,
-            Lights
-        >>(materialDatabase.GetPipeline(PipelineType::DefaultColor));
-
-        node.SetName("Default Color Node");
-        node.SetAttachments(
-            DefaultColorAttachments{
-                .color = drawContext.output,
-                .depth = drawContext.depth
-            }
-        );
-        
-        MaterialDatabase::QueueDrawModels(node, drawContext, material.models, 
-            [](const ModelData& model, const DrawContext& context) {
-
-            Transforms transforms {
-                .camera = context.mainViewCamera,
-                .model = model.transformsRange
-            };
-
-            Textures textures {
-                .textureIds = model.textureIds,
-                .colorTexture = context.colorTextures[0],
-                .colorTexture_sampler = context.linearSampler
-            };
-
-            Lights lights {
-                .lightsConfig = context.lights,
-                .directShadowmap = context.directShadowmap,
-                .directShadowmap_sampler = context.linearSampler
-            };
-
-            return std::tuple {transforms, textures, lights};
-        });
+    Ref<ComputePipeline> GetComputePipeline(PipelineKey key) {
+        return _compuePipelines[key];
     }
 
-    VkFormat depthFormat;
-
-private: 
-
-    static void GenericDepthPass(
-        MaterialDatabase& materialDatabase, 
-        const DrawContext& drawContext, 
-        MaterialPass& material,
-        PipelineType pipeline 
-    ) {
-        auto& node = drawContext.context.Get<RenderGraph>().AddNode<GraphicsNode<
-            DepthOnlyAttachments, 
-            Transforms
-        >>(materialDatabase.GetPipeline(pipeline));
-
-        node.SetName("Depth only node");
-        node.SetAttachments(
-            DepthOnlyAttachments{
-                .depth = drawContext.depth
-            }
-        );
-        
-        MaterialDatabase::QueueDrawModels(node, drawContext, material.models, 
-            [](const ModelData& model, const DrawContext& context) {
-
-            Transforms transforms {
-                .camera = context.mainViewCamera,
-                .model = model.transformsRange
-            };
-            return std::tuple {transforms};
-        });
+    template<typename PassType, typename... Args>
+    PassType Create(Args&&... args) {
+        return PassType(&m_renderContext, this, std::forward<Args>(args)...);
     }
-
-    RenderContext& m_renderContext;
 
     template<typename Attachments, typename... Bindings, typename Func>
     static void QueueDrawModels(
@@ -152,8 +122,8 @@ private:
         Func&& getBindings
     ) {
         
-        node.SetIndexBuffer(drawContext.indexBuffer, VkIndexType::VK_INDEX_TYPE_UINT32);
-        node.AddVertexBuffer(drawContext.vertexBuffer);
+        node.SetIndexBuffer(drawContext.resources.indexBuffer, VkIndexType::VK_INDEX_TYPE_UINT32);
+        node.AddVertexBuffer(drawContext.resources.vertexBuffer);
 
         uint32_t i = 0;
         for (uint32_t index: models) {
@@ -177,79 +147,34 @@ private:
             });
         }
     }
-
-
-    Ref<GraphicsPipeline> CreatePipeline(PipelineType type) {
-        switch (type) {
-            case PipelineType::DefaultColor:
-                return CreateDefaultColor();
-            case PipelineType::DepthOnly:
-                return CreateDepthPrepass(VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT);
-            case PipelineType::DepthShadowmap:
-                return CreateDepthPrepass(VkCullModeFlagBits::VK_CULL_MODE_FRONT_BIT);
-            case PipelineType::FullScreenQuad:
-                return CreateFullScreenQuad();
-            default:
-                ASSERT_MSG(false, "unknown pipeline type");
-        }
-    }
-
-    Ref<GraphicsPipeline> CreateDefaultColor() {
-        ShaderBinary vertexBin = m_renderContext.Get<ShaderLoader>().Get("shaders/basic.vert", Stage::Vertex);
-        ShaderBinary fragmentBin = m_renderContext.Get<ShaderLoader>().Get("shaders/basic.frag", Stage::Fragment);
-        
-        return m_renderContext
-            .Get<GraphicsFeature>().NewGraphicsPipeline()
-            .AddVertex<Vertex>()
-            .AddLayout<Transforms>()
-            .AddLayout<Textures>()
-            .AddLayout<Lights>()
-            .SetAttachments<DefaultColorAttachments>(DefaultColorAttachments::Formats{
-                .color = m_renderContext.Get<PresentFeature>().swapChain->format,
-                .depth = depthFormat
-            })
-            .AddShaderStage(vertexBin)
-            .AddShaderStage(fragmentBin)
-            .SetDepthWriteEnabled(false)
-            .SetDepthCompareOp(VkCompareOp::VK_COMPARE_OP_EQUAL)
-            .SetCullMode(VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT, VkFrontFace::VK_FRONT_FACE_COUNTER_CLOCKWISE)
-            .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_VIEWPORT)
-            .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_SCISSOR)
-            .Build();
-    }
-
-    Ref<GraphicsPipeline> CreateDepthPrepass(VkCullModeFlags cullMode) {
-        ShaderBinary vertexBin = m_renderContext.Get<ShaderLoader>().Get("shaders/basic.vert", Stage::Vertex);
-        
-        return m_renderContext
-            .Get<GraphicsFeature>().NewGraphicsPipeline()
-            .AddVertex<Vertex>()
-            .AddLayout<Transforms>()
-            .SetAttachments<DepthOnlyAttachments>(DepthOnlyAttachments::Formats{
-                .depth = depthFormat
-            })
-            .AddShaderStage(vertexBin)
-            .SetCullMode(cullMode, VkFrontFace::VK_FRONT_FACE_COUNTER_CLOCKWISE)
-            .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_VIEWPORT)
-            .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_SCISSOR)
-            .Build();
-    }
-
-    Ref<GraphicsPipeline> CreateFullScreenQuad() {
-        ShaderBinary vertexBin = m_renderContext.Get<ShaderLoader>().Get("shaders/fullScreenQuad.vert", Stage::Vertex);
-        ShaderBinary fragmentBin = m_renderContext.Get<ShaderLoader>().Get("shaders/fullScreenQuad.frag", Stage::Fragment);
-
-        return m_renderContext
-            .Get<GraphicsFeature>().NewGraphicsPipeline()
-            .AddLayout<FullScreenQuad>()
-            .SetAttachments<ColorOnlyAttachments>(ColorOnlyAttachments::Formats{
-                .color = m_renderContext.Get<PresentFeature>().swapChain->format
-            })
-            .AddShaderStage(vertexBin)
-            .AddShaderStage(fragmentBin)
-            .SetCullMode(VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT, VkFrontFace::VK_FRONT_FACE_COUNTER_CLOCKWISE)
-            .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_VIEWPORT)
-            .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_SCISSOR)
-            .Build();
-    }
 };
+
+Ref<ComputePipeline> Pass::GetComputePipeline(uint32_t index) {
+    PipelineKey key {
+        .typeId = TypeId(typeid(*this)),
+        .index = index
+    };
+    Ref<ComputePipeline> pipeline = materialDatabase->GetComputePipeline(key);
+    
+    if (!pipeline.isNull())
+        return pipeline;
+
+    pipeline = CreateComputePipeline(index);
+    materialDatabase->RegisterPipeline(pipeline, key);
+    return pipeline;
+}     
+
+Ref<GraphicsPipeline> Pass::GetGraphicsPipeline(uint32_t index) {
+    PipelineKey key {
+        .typeId = TypeId(typeid(*this)),
+        .index = index
+    };
+    Ref<GraphicsPipeline> pipeline = materialDatabase->GetGraphicsPipeline(key);
+    
+    if (!pipeline.isNull())
+        return pipeline;
+
+    pipeline = CreateGraphicsPipeline(index);
+    materialDatabase->RegisterPipeline(pipeline, key);
+    return pipeline;
+}     

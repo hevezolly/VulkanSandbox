@@ -1,11 +1,16 @@
 #version 450
+#extension GL_ARB_shading_language_include : enable
+#include <brdf.glsl>
 
 layout(binding = 0) uniform CameraUBO {
     mat4 view;
     mat4 projection;
+    vec4 forward;
 } camera;
 
 layout(binding = 0, set=1) uniform TexturesUBO {
+    vec4 f0roughness;
+    float metallic;
     uint textureId;
 };
 
@@ -41,14 +46,29 @@ float SampleShadowmap(vec3 worldPosition) {
 }
 
 void main() {
-    vec3 normal = normalize(in_normal);
+    
+    const vec3 dielectric_f0 = vec3(0.04f);
 
-    float NdotL = max(dot(normal, Lights.DirLightDirection.xyz), 0);
+    vec3 f0 = mix(dielectric_f0, f0roughness.xyz, metallic);
+
+
+    vec3 n = normalize(in_normal);
+    vec3 l = Lights.DirLightDirection.xyz;
+    vec3 v = -camera.forward.xyz;
+
+    vec3 f_factor = fresnel(f0, dot(n, v));
+    vec3 kD = (vec3(1.0) - f_factor) * (1.0 - metallic);
+
+
     vec3 albedo = texture(textures[textureId], uv).xyz;
 
-    vec3 light = NdotL * Lights.DirLightColor.xyz * SampleShadowmap(position_world);
+    vec3 diffuse = kD * albedo / PI;
+    vec3 specular = specular_brdf(l, v, n, f0roughness.w, f0);
 
-    vec3 color = albedo * light;
+    float NdotL = max(dot(n, Lights.DirLightDirection.xyz), 0);
+    vec3 light = Lights.DirLightColor.xyz * SampleShadowmap(position_world) * Lights.DirLightColor.w;
+
+    vec3 color = (diffuse + specular) * light * NdotL;
     outColor = vec4(color, 1);
 
 }

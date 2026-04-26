@@ -2,6 +2,7 @@
 layout(binding = 0) uniform CameraUBO {
     mat4 view;
     mat4 projection;
+    vec4 forward;
 } camera;
 
 layout(binding = 1) uniform ModelUBO {
