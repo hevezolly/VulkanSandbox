@@ -14,19 +14,14 @@ struct GenerateSkyboxPass: Pass {
 
     void Run(ResourceRef<Image> output, BufferRegion light) {
 
-        auto node = context->Get<RenderGraph>().AddNode<ComputeNode<GenSkyboxInput>>(
+        auto& node = context->Get<RenderGraph>().AddNode<ComputeNode<GenSkyboxInput>>(
             GetComputePipeline(), QueueType::Graphics
         );
-
-        node.SetName("Gen skybox");
 
         auto b = GenSkyboxInput {
             .output = output,
             .lightData = light
         };
-
-        LOG("reference")
-        logMemory(&b, sizeof(BufferRegion) + sizeof(ImageSubresource));
 
         node.SetBindings(b);
 

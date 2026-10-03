@@ -9,6 +9,7 @@ set(VULKAN_ENGINE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(VULKAN_ENGINE_IMGUI_UI ON CACHE BOOL "" FORCE)
 
 add_subdirectory(VulkanEngine)
+target_compile_definitions(VulkanEngine PRIVATE THROW_ON_UNDESIRED_SWAPCHAIN)
 
 add_executable(VulkanSandbox src/main.cpp)
 

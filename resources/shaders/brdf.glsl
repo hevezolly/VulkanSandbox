@@ -1,5 +1,5 @@
-#ifndef BRDF_GLSL__
-#define BRDF_GLSL__
+#ifndef BRDF_GLSL_
+#define BRDF_GLSL_
 
 #define PI 3.14159265
 

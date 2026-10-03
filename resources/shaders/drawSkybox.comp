@@ -1,0 +1,30 @@
+#version 450
+#extension GL_ARB_shading_language_include : enable
+#include <commonData.glsl>
+
+layout(binding = 1) uniform samplerCube skybox;
+layout(rgba8, binding = 2) writeonly uniform image2D outImage;
+
+layout(binding = 0) uniform CameraUBO {
+    CameraData camera;
+};
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+void main() {
+    ivec2 texelCord = ivec2(gl_GlobalInvocationID.xy);
+
+    ivec2 size = imageSize(outImage);
+    if (any(lessThan(texelCord, ivec2(0))) || any(greaterThan(texelCord, size)))
+        return;
+
+    vec2 uv = (vec2(texelCord) + 0.5) / size;
+    vec2 ndc = uv * 2.0 - 1.0;
+    ndc.y *= -1;
+    vec4 worldDir = camera.invView * camera.invProjection * vec4(ndc, 0.1, 0.0);
+    worldDir /= worldDir.w;
+    vec3 dir = normalize(worldDir.xyz);
+
+    vec3 value = texture(skybox, dir).xyz;
+
+    imageStore(outImage, texelCord, vec4(value, 0));
+}

@@ -12,12 +12,15 @@
 #include "passes/depth_pass.h"
 #include "passes/main_pass.h"
 #include "passes/generate_skybox_pass.h"
+#include "passes/draw_skybox_pass.h"
 
 class Scene {
 
     struct CameraData {
         glm::mat4x4 view;
         glm::mat4x4 projection;
+        glm::mat4x4 invView;
+        glm::mat4x4 invProjection;
         glm::vec4 forward;
     };
 
@@ -54,6 +57,7 @@ class Scene {
     MainPass colorPass;
     DepthPass directShadowmapPass;
     GenerateSkyboxPass skyboxPass;
+    DrawSkyboxPass drawSkyboxPass;
 
     glm::vec3 f0 = {0, 0, 0};
     float roughness = 0.1f;
@@ -98,6 +102,7 @@ class Scene {
         directShadowmapPass = materialDatabase.Create<DepthPass>(VkCullModeFlagBits::VK_CULL_MODE_FRONT_BIT);
         colorPass = materialDatabase.Create<MainPass>();
         skyboxPass = materialDatabase.Create<GenerateSkyboxPass>();
+        drawSkyboxPass = materialDatabase.Create<DrawSkyboxPass>();
         
         uint32_t viking_room = AddObject("models/viking_room.obj", 
             {&depthPass, &colorPass, &directShadowmapPass});
@@ -127,6 +132,8 @@ class Scene {
         d.projection = glm::perspective(glm::radians(45.0f), swapChain->extent.width / (float) swapChain->extent.height, 0.1f, 10.0f);
         d.projection[1][1] *= -1;
         d.forward = glm::vec4(glm::normalize(m_cameraForward), 0);
+        d.invProjection = glm::inverse(d.projection);
+        d.invView = glm::inverse(d.view);
         return d;
     }
 
@@ -149,6 +156,8 @@ class Scene {
         result.view = glm::lookAt(glm::vec3(m_lights.dirLightDirection) * glm::vec3(2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         result.projection = VulkanOrtho(-size, size, -size, size, 0.1f, 10.0f);
         result.forward = -m_lights.dirLightDirection;
+        result.invProjection = glm::inverse(result.projection);
+        result.invView = glm::inverse(result.view);
         return result;
     }
 
@@ -332,7 +341,8 @@ public:
         };
 
         skyboxPass.Run(m_resources.skybox, drawContext.lights);
-
+        drawSkyboxPass.Run(output, m_resources.skybox, m_resources.linearSampler, mainViewCameraRange);
+        
         m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(m_resources.depthBuffer);
         DrawPass(drawContext, depthPass);
 
@@ -344,8 +354,8 @@ public:
         drawContext.depth = m_resources.depthBuffer;
         drawContext.mainViewCamera = mainViewCameraRange;
         
-        m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(output);
         DrawPass(drawContext, colorPass);
+        
     }
 
     void OnEngFrame() {

@@ -1,12 +1,11 @@
 #version 450
 #extension GL_ARB_shading_language_include : enable
 #include <brdf.glsl>
+#include <commonData.glsl>
 
 layout(binding = 0) uniform CameraUBO {
-    mat4 view;
-    mat4 projection;
-    vec4 forward;
-} camera;
+    CameraData camera;
+};
 
 layout(binding = 0, set=1) uniform TexturesUBO {
     vec4 f0roughness;
