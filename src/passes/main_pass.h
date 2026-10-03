@@ -40,7 +40,9 @@ struct MainPass: GeometryPass<DefaultColorAttachments, Transforms, Textures, Lig
             Lights lights {
                 .lightsConfig = context.lights,
                 .directShadowmap = context.resources.directShadowmap,
-                .directShadowmap_sampler = context.resources.linearSampler
+                .directShadowmap_sampler = context.resources.linearSampler,
+                .diffuseIBL = context.resources.diffuseIbl,
+                .diffuseIBL_sampler = context.resources.linearSampler
             };
 
             return std::tuple {transforms, textures, lights};

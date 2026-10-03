@@ -32,7 +32,8 @@ IMAGE_SAMPLER(colorTexture, 1, Stage::Fragment)
 #define BLOCK_NAME Lights
 #define BLOCK \
 DYNAMIC_UNIFORM(lightsConfig, 0, Stage::Fragment) \
-IMAGE_SAMPLER(directShadowmap, 1, Stage::Fragment)
+IMAGE_SAMPLER(directShadowmap, 1, Stage::Fragment) \
+IMAGE_SAMPLER(diffuseIBL, 2, Stage::Fragment)
 #include <gen_bindings.h>
 
 struct LightsConfig {
@@ -61,6 +62,7 @@ struct ResourcesRefs {
     ResourceRefs<Image> images;
     ResourceRef<Image> directShadowmap;
     ResourceRef<Image> skybox;
+    ResourceRef<Image> diffuseIbl;
 };
 
 struct DrawContext {

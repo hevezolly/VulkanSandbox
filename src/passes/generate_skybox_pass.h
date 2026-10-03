@@ -4,23 +4,42 @@
 
 #define BLOCK_NAME GenSkyboxInput
 #define BLOCK \
-IMAGE_STORAGE(output, 1, Stage::Compute, Access::Write) \
-DYNAMIC_UNIFORM(lightData, 0, Stage::Compute)
+IMAGE_STORAGE(output, 2, Stage::Compute, Access::Write) \
+DYNAMIC_UNIFORM(lightData, 0, Stage::Compute) \
+DYNAMIC_UNIFORM(genData, 1, Stage::Compute)
 #include <gen_bindings.h>
+
+
+
+struct SkyboxGenData {
+    glm::vec3 SkyColor;
+    int CubemapSize;
+
+    glm::vec3 GroundColor;
+    float GroundTransition;
+};
 
 struct GenerateSkyboxPass: Pass {
 
     using Pass::Pass;
 
-    void Run(ResourceRef<Image> output, BufferRegion light) {
+    void Run(
+        ResourceRef<Image> output, 
+        BufferRegion light,
+        SkyboxGenData genData
+    ) {
 
         auto& node = context->Get<RenderGraph>().AddNode<ComputeNode<GenSkyboxInput>>(
-            GetComputePipeline(), QueueType::Graphics
+            GetComputePipeline(), QueueType::Compute
         );
+
+        genData.CubemapSize = output->description.width;
+        BufferRegion genDataBuff = context->Get<DynamicUniforms>().Allocate(genData);
 
         auto b = GenSkyboxInput {
             .output = output,
-            .lightData = light
+            .lightData = light,
+            .genData = genDataBuff
         };
 
         node.SetBindings(b);

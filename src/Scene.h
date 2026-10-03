@@ -13,6 +13,7 @@
 #include "passes/main_pass.h"
 #include "passes/generate_skybox_pass.h"
 #include "passes/draw_skybox_pass.h"
+#include "passes/generate_ibl.h"
 
 class Scene {
 
@@ -32,8 +33,8 @@ class Scene {
 
     glm::vec3 m_cameraPosition = {2, 2, 2};
     glm::vec3 m_cameraForward = -m_cameraPosition;
-    float m_cameraVelocity = 0.1f;
-    float m_cameraRotationVelocity = 0.025f;
+    float m_cameraVelocity = 0.025f;
+    float m_cameraRotationVelocity = 0.01f;
 
     RenderContext& m_renderContext;
 
@@ -42,6 +43,12 @@ class Scene {
         .dirLightDirection = {0.813, 0.366, 0.453, 0},
         .dirLightColor = {1, 1, 1, 7},
         .depthBias = 0.0005f
+    };
+
+    SkyboxGenData m_skyboxGenData {
+        .SkyColor = {0.35, 0.82, 1.},
+        .GroundColor = {0.5, 0.45, 0.35},
+        .GroundTransition = 3.5,
     };
 
     uint32_t m_nextObjectPosition;
@@ -58,6 +65,7 @@ class Scene {
     DepthPass directShadowmapPass;
     GenerateSkyboxPass skyboxPass;
     DrawSkyboxPass drawSkyboxPass;
+    GenerateIBLPass generateIblPass;
 
     glm::vec3 f0 = {0, 0, 0};
     float roughness = 0.1f;
@@ -66,6 +74,8 @@ class Scene {
     DebugData m_debugData;
 
     float size = 2.0f;
+
+    bool m_skyboxActual = false;
 
     void InitializeResources() {
         Resources& resources = m_renderContext.Get<Resources>();
@@ -94,6 +104,11 @@ class Scene {
             ImageUsage::Storage | ImageUsage::Sampled | ImageUsage::TransferDst));
 
         resources.GiveName(m_resources.skybox, "skybox");
+
+        m_resources.diffuseIbl = resources.CreateImage(ImageDescription::Cube(VK_FORMAT_B10G11R11_UFLOAT_PACK32, {32, 32}, 
+            ImageUsage::Storage | ImageUsage::Sampled | ImageUsage::TransferDst));
+
+        resources.GiveName(m_resources.diffuseIbl, "diffuseIbl");
     }
 
     void PopulateScene() {
@@ -103,6 +118,7 @@ class Scene {
         colorPass = materialDatabase.Create<MainPass>();
         skyboxPass = materialDatabase.Create<GenerateSkyboxPass>();
         drawSkyboxPass = materialDatabase.Create<DrawSkyboxPass>();
+        generateIblPass = materialDatabase.Create<GenerateIBLPass>();
         
         uint32_t viking_room = AddObject("models/viking_room.obj", 
             {&depthPass, &colorPass, &directShadowmapPass});
@@ -221,6 +237,14 @@ class Scene {
             // subtract height for any buttons/widgets below the child
             float childHeight = available.y - ImGui::GetFrameHeightWithSpacing();
 
+            bool skyboxChanged = false;
+
+
+            if (ImGui::Button("Reload Shaders")) {
+                materialDatabase.InvalidatePipelines();
+                skyboxChanged = true;                
+            }
+
             ImGui::BeginChild("scrollable", ImVec2(available.x, childHeight), true);
 
             ImGui::SliderFloat3("camera pos", &m_cameraPosition[0], -2, 2);
@@ -231,11 +255,11 @@ class Scene {
                 if (ImGui::SliderFloat3("light direction", &m_lights.dirLightDirection[0], -1, 1)) {
                     m_lights.dirLightDirection = glm::vec4(
                     glm::normalize(glm::vec3(m_lights.dirLightDirection)), 0);
+                    skyboxChanged |= true;
                 }
 
-                ImGui::ColorPicker3("light color", &m_lights.dirLightColor[0]);
-
-                ImGui::DragFloat("light intensity", &m_lights.dirLightColor.w);
+                skyboxChanged |= ImGui::ColorPicker3("light color", &m_lights.dirLightColor[0]);
+                skyboxChanged |= ImGui::DragFloat("light intensity", &m_lights.dirLightColor.w);
             
             }
 
@@ -250,9 +274,20 @@ class Scene {
                 ImGui::SliderFloat("roughness", &roughness, 0.0001f, 1.0f);
                 ImGui::SliderFloat("metallicness", &metallicness, 0.0f, 1.0f);
             }
+
+            if (ImGui::CollapsingHeader("skybox")) {
+                skyboxChanged |= ImGui::ColorPicker3("SkyColor", &m_skyboxGenData.SkyColor[0]);
+                skyboxChanged |= ImGui::ColorPicker3("GroundColor", &m_skyboxGenData.GroundColor[0]);
+                skyboxChanged |= ImGui::SliderFloat("GroundTransition", &m_skyboxGenData.GroundTransition, 0, 180);
+            }
             ImGui::EndChild();
+
+            if (skyboxChanged) {
+                m_skyboxActual = false;
+            }
         }
         ImGui::End();        
+
     }
 
 public:
@@ -340,7 +375,12 @@ public:
             .context = m_renderContext
         };
 
-        skyboxPass.Run(m_resources.skybox, drawContext.lights);
+        
+        if (!m_skyboxActual) {
+            skyboxPass.Run(m_resources.skybox, drawContext.lights, m_skyboxGenData);
+            generateIblPass.Run(m_resources.skybox, m_resources.diffuseIbl, m_resources.linearSampler);
+            m_skyboxActual = true;
+        }
         drawSkyboxPass.Run(output, m_resources.skybox, m_resources.linearSampler, mainViewCameraRange);
         
         m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(m_resources.depthBuffer);

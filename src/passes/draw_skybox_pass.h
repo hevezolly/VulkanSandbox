@@ -16,7 +16,7 @@ struct DrawSkyboxPass: Pass {
     void Run(ResourceRef<Image> output, ResourceRef<Image> skybox, ResourceRef<Sampler> sampler, BufferRegion cameraData) {
 
         auto& node = context->Get<RenderGraph>().AddNode<ComputeNode<DrawSkyboxInput>>(
-            GetComputePipeline(), QueueType::Graphics
+            GetComputePipeline(), QueueType::Compute
         );
 
         auto b = DrawSkyboxInput {

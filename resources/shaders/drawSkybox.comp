@@ -11,20 +11,25 @@ layout(binding = 0) uniform CameraUBO {
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 void main() {
-    ivec2 texelCord = ivec2(gl_GlobalInvocationID.xy);
-
+    ivec2 texelCoord = ivec2(gl_GlobalInvocationID.xy);
     ivec2 size = imageSize(outImage);
-    if (any(lessThan(texelCord, ivec2(0))) || any(greaterThan(texelCord, size)))
+
+    if (any(greaterThanEqual(texelCoord, size)))
         return;
 
-    vec2 uv = (vec2(texelCord) + 0.5) / size;
+    vec2 uv = (vec2(texelCoord) + 0.5) / vec2(size);
     vec2 ndc = uv * 2.0 - 1.0;
-    ndc.y *= -1;
-    vec4 worldDir = camera.invView * camera.invProjection * vec4(ndc, 0.1, 0.0);
-    worldDir /= worldDir.w;
-    vec3 dir = normalize(worldDir.xyz);
 
-    vec3 value = texture(skybox, dir).xyz;
+    // Vulkan NDC depth is [0, 1]. An interior depth also works
+    // with reverse-Z and avoids an infinite far-plane endpoint.
+    vec4 viewPoint = camera.invProjection * vec4(ndc, 0.5, 1.0);
+    vec3 viewDir = viewPoint.xyz / viewPoint.w;
 
-    imageStore(outImage, texelCord, vec4(value, 0));
+    // w = 0 excludes camera translation.
+    vec3 worldDir = normalize(
+        (camera.invView * vec4(viewDir, 0.0)).xyz
+    );
+
+    vec3 value = textureLod(skybox, worldDir, 0.0).rgb;
+    imageStore(outImage, texelCoord, vec4(value, 1.0));
 }

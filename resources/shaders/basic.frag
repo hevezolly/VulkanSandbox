@@ -15,16 +15,12 @@ layout(binding = 0, set=1) uniform TexturesUBO {
 
 layout(binding = 1, set = 1) uniform sampler2D textures[1];
 
-layout(binding = 0, set = 2) uniform LightsData {
-
-    mat4 DirShadowViewPorjection;
-    vec4 DirLightDirection;
-    vec4 DirLightColor;
-    float DepthBias;
-
-} Lights;
+layout(binding = 0, set = 2) uniform LightsDataUBO {
+    LightData Lights;
+};
 
 layout(binding = 1, set = 2) uniform sampler2D directShadowmap;
+layout(binding = 2, set = 2) uniform samplerCube diffuseIbl;
 
 layout(location = 0) in vec2 uv;
 layout(location = 1) in vec3 in_normal;
@@ -58,16 +54,17 @@ void main() {
     vec3 f_factor = fresnel(f0, dot(n, v));
     vec3 kD = (vec3(1.0) - f_factor) * (1.0 - metallic);
 
-
     vec3 albedo = texture(textures[textureId], uv).xyz;
 
+    vec3 diffuseBRDF = kD * albedo;
     vec3 diffuse = kD * albedo / PI;
     vec3 specular = specular_brdf(l, v, n, f0roughness.w, f0);
 
     float NdotL = max(dot(n, Lights.DirLightDirection.xyz), 0);
     vec3 light = Lights.DirLightColor.xyz * SampleShadowmap(position_world) * Lights.DirLightColor.w;
 
-    vec3 color = (diffuse + specular) * light * NdotL;
-    outColor = vec4(color, 1);
+    vec3 dirLight = (diffuseBRDF / PI + specular) * light * NdotL;
+    vec3 envDiffuse = diffuseBRDF * textureLod(diffuseIbl, n, 0.0).rgb;
+    outColor = vec4(dirLight + envDiffuse, 1);
 
 }

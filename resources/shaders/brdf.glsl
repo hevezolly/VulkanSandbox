@@ -1,7 +1,6 @@
 #ifndef BRDF_GLSL_
 #define BRDF_GLSL_
-
-#define PI 3.14159265
+#include <constants.glsl>
 
 vec3 fresnel(vec3 f0, float ndotl) {
     float negndotl = 1.0f - ndotl;

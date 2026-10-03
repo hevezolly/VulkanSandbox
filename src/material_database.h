@@ -101,6 +101,11 @@ struct MaterialDatabase
         _compuePipelines[key] = pipeline;
     }
 
+    void InvalidatePipelines() {
+        _graphicsPipelines.clear();
+        _compuePipelines.clear();
+    }
+
     Ref<GraphicsPipeline> GetGraphicsPipeline(PipelineKey key) {
         return _graphicsPipelines[key];
     }
