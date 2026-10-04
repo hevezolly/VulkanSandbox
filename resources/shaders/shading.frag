@@ -9,7 +9,7 @@ layout(binding = 0) uniform CameraUBO {
 
 layout(binding = 0, set=1) uniform TexturesUBO {
     vec4 f0roughness;
-    float metallic;
+    vec4 albedoMetallic;
     uint textureId;
 };
 
@@ -46,6 +46,9 @@ void main() {
     
     const vec3 dielectric_f0 = vec3(0.04f);
 
+    float metallic = clamp(albedoMetallic.w, 0.0001, 1);
+    float roughness = clamp(f0roughness.w, 0.0001, 1);
+    
     vec3 f0 = mix(dielectric_f0, f0roughness.xyz, metallic);
 
     vec3 n = normalize(in_normal);
@@ -56,11 +59,14 @@ void main() {
     vec3 f_factor = fresnel(f0, dot(n, v));
     vec3 kD = (vec3(1.0) - f_factor) * (1.0 - metallic);
 
-    vec3 albedo = texture(textures[textureId], uv).xyz;
+    vec3 albedo = albedoMetallic.xyz;
+    if (textureId != 0xffffffff) {
+        albedo *= texture(textures[textureId], uv).xyz; 
+    }
 
     vec3 diffuseBRDF = kD * albedo;
     vec3 diffuse = kD * albedo / PI;
-    vec3 specularBrdfDirLight = specularBrdf(l, v, n, f0roughness.w, f0);
+    vec3 specularBrdfDirLight = specularBrdf(l, v, n, roughness, f0);
 
     float NdotL = max(dot(n, Lights.DirLightDirection.xyz), 0);
     vec3 light = Lights.DirLightColor.xyz * SampleShadowmap(position_world) * Lights.DirLightColor.w;
@@ -68,8 +74,8 @@ void main() {
 
     vec3 envDiffuse = diffuseBRDF * textureLod(diffuseIbl, n, 0.0).rgb;
 
-    vec2 secularBrdfLookup = texture(brdfLut, vec2(clamp(dot(n, v), 0.0, 1.0), clamp(f0roughness.w, 0.0, 1.0))).xy;
-    float specularSampleMip = f0roughness.w * (Lights.SpecularMipCount - 1);
+    vec2 secularBrdfLookup = texture(brdfLut, vec2(clamp(dot(n, v), 0.0, 1.0), clamp(roughness, 0.0, 1.0))).xy;
+    float specularSampleMip = roughness * (Lights.SpecularMipCount - 1);
     vec3 prefilteredSpecular = textureLod(specularIbl, R, specularSampleMip).rgb;
     vec3 envSpecular = prefilteredSpecular * (f0 * secularBrdfLookup.x + secularBrdfLookup.y);
 

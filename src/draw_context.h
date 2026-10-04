@@ -46,15 +46,25 @@ struct LightsConfig {
     float specularMipCount;
 };
 
+struct Material {
+    glm::vec3 f0;
+    float roughness;
+    float metallness;
+    glm::vec3 albedo;
+    uint32_t imageId = 0xffffffff;
+
+    BufferRegion range;
+};
+
 struct ModelData {
     uint32_t indexOffset;
     uint32_t indexSize;
 
     glm::mat4x4 modelTransform;
-    uint32_t imageId;
+    uint32_t material;
             
     BufferRegion transformsRange;
-    BufferRegion textureIds;
+    BufferRegion materialRange;
 };
 
 struct ResourcesRefs {
@@ -64,6 +74,7 @@ struct ResourcesRefs {
     ResourceRef<Image> depthBuffer;
     ResourceRefs<Image> images;
     ResourceRef<Image> directShadowmap;
+    ResourceRef<Image> skybox_raw;
     ResourceRef<Image> skybox;
     ResourceRef<Image> diffuseIbl;
     ResourceRef<Image> specularIbl;

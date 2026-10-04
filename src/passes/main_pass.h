@@ -32,7 +32,7 @@ struct MainPass: GeometryPass<DefaultColorAttachments, Transforms, Textures, Lig
             };
 
             Textures textures {
-                .textureIds = model.textureIds,
+                .textureIds = model.materialRange,
                 .colorTexture = context.resources.images[0],
                 .colorTexture_sampler = context.resources.linearSampler
             };

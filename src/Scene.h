@@ -15,6 +15,7 @@
 #include "passes/draw_skybox_pass.h"
 #include "passes/generate_ibl.h"
 #include "passes/generate_specular_brdf_lut.h"
+#include "passes/post_process_skybox_pass.h"
 
 class Scene {
 
@@ -27,9 +28,9 @@ class Scene {
         glm::vec4 position;
     };
 
-    struct PerModelData {
+    struct MaterialData {
         glm::vec4 f0Roughness;
-        float metallicness;
+        glm::vec4 albedoMetallic;
         uint32_t textureId;
     };
 
@@ -42,8 +43,8 @@ class Scene {
 
     LightsConfig m_lights {
         .dirLightTransform = glm::identity<glm::mat4>(),
-        .dirLightDirection = {0.813, 0.366, 0.453, 0},
-        .dirLightColor = {1, 1, 1, 7},
+        .dirLightDirection = {0, -0.94, 0.33, 0},
+        .dirLightColor = {1, 1, 1, 3},
         .depthBias = 0.0005f
     };
 
@@ -53,13 +54,14 @@ class Scene {
         .GroundTransition = 3.5,
     };
 
-    uint32_t m_nextObjectPosition;
     std::vector<Vertex> m_vertices;
     std::vector<uint32_t> m_indices;
     
     ResourcesRefs m_resources;
 
     std::vector<ModelData> m_models;
+    std::vector<Material> m_materials;
+    std::unordered_map<std::string, std::tuple<uint32_t, uint32_t>> m_loadedModels;
     std::unordered_map<Pass*, std::vector<uint32_t>> m_modelPassMapping;
 
     DepthPass depthPass;
@@ -69,6 +71,8 @@ class Scene {
     DrawSkyboxPass drawSkyboxPass;
     GenerateIBLPass generateIblPass;
     GenerateBrdfLut generateBrdf;
+    PostProcessSkyboxPass postProcessSkyboxPass;
+
 
     glm::vec3 f0 = {0, 0, 0};
     float roughness = 0.1f;
@@ -104,7 +108,22 @@ class Scene {
         ));
 
         resources.GiveName(m_resources.directShadowmap, "direct shadowmap");
-        m_resources.skybox = resources.CreateImage(ImageDescription::Cube(VK_FORMAT_B10G11R11_UFLOAT_PACK32, {512, 512}, 
+
+        m_resources.skybox_raw = resources.LoadCubeImage(
+            ImageUsage::Sampled | ImageUsage::TransferDst,
+            "textures/skybox/px.jpg",
+            "textures/skybox/nx.jpg",
+            "textures/skybox/py.jpg",
+            "textures/skybox/ny.jpg",
+            "textures/skybox/pz.jpg",
+            "textures/skybox/nz.jpg",
+            VK_FORMAT_R8G8B8A8_SRGB
+        );
+
+        resources.GiveName(m_resources.skybox_raw, "skybox_raw");
+
+        m_resources.skybox = resources.CreateImage(ImageDescription::Cube(
+            VK_FORMAT_B10G11R11_UFLOAT_PACK32, m_resources.skybox_raw->description.extent(), 
             ImageUsage::Storage | ImageUsage::Sampled | ImageUsage::TransferDst));
 
         resources.GiveName(m_resources.skybox, "skybox");
@@ -128,8 +147,7 @@ class Scene {
         resources.GiveName(m_resources.brdfLut, "brdfLut");
     }
 
-    void PopulateScene() {
-
+    void InitPasses() {
         depthPass = materialDatabase.Create<DepthPass>(VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT);
         directShadowmapPass = materialDatabase.Create<DepthPass>(VkCullModeFlagBits::VK_CULL_MODE_FRONT_BIT);
         colorPass = materialDatabase.Create<MainPass>();
@@ -137,10 +155,46 @@ class Scene {
         drawSkyboxPass = materialDatabase.Create<DrawSkyboxPass>();
         generateIblPass = materialDatabase.Create<GenerateIBLPass>();
         generateBrdf = materialDatabase.Create<GenerateBrdfLut>();
+        postProcessSkyboxPass = materialDatabase.Create<PostProcessSkyboxPass>();
+    }
+
+    void PopulateScene() {
+        InitPasses();
+
+        const int xSize = 5;
+        const int ySize = 5;
+
+        for (int roughness = 0; roughness < xSize; roughness++) {
+            for (int metallness = 0; metallness < ySize; metallness++) {
+                uint32_t material = AddMaterial(Material{
+                    .f0 = glm::vec3(1.000, 0.766, 0.336),
+                    .roughness = static_cast<float>(roughness) / (xSize - 1),
+                    .metallness = static_cast<float>(metallness) / (ySize - 1),
+                    .albedo = glm::vec3(1.000, 0.766, 0.336)
+                });
+
+                uint32_t sphere = AddObject("models/sphere.obj",
+                    {&depthPass, &colorPass, &directShadowmapPass}
+                );
+                m_models[sphere].material = material;
+                m_models[sphere].modelTransform = glm::translate(
+                    m_models[sphere].modelTransform, 
+                    glm::vec3(static_cast<float>(roughness) * 2.5, 0, static_cast<float>(metallness) * 2.5)
+                );
+            }
+        }
+
+        // uint32_t material = AddMaterial(Material{
+        //     .f0 = f0,
+        //     .roughness = roughness,
+        //     .metallness = metallicness,
+        //     .albedo = glm::vec3(1, 1, 1),
+        //     .imageId = 0
+        // });
         
-        uint32_t viking_room = AddObject("models/viking_room.obj", 
-            {&depthPass, &colorPass, &directShadowmapPass});
-        m_models[viking_room].imageId = 0;
+        // uint32_t viking_room = AddObject("models/viking_room.obj", 
+        //     {&depthPass, &colorPass, &directShadowmapPass});
+        // m_models[viking_room].material = material;
     }
 
     glm::mat4 viewMatrix(glm::vec3 pos, glm::vec3 forward, glm::vec3 right, glm::vec3 up) {
@@ -163,7 +217,7 @@ class Scene {
         glm::vec3 right = glm::cross(m_cameraForward, {0, 0, 1});
         glm::vec3 up = glm::cross(right, m_cameraForward);
         d.view = glm::lookAt(m_cameraPosition, m_cameraPosition + m_cameraForward, up);
-        d.projection = glm::perspective(glm::radians(45.0f), swapChain->extent.width / (float) swapChain->extent.height, 0.1f, 10.0f);
+        d.projection = glm::perspective(glm::radians(45.0f), swapChain->extent.width / (float) swapChain->extent.height, 0.1f, 100.0f);
         d.projection[1][1] *= -1;
         d.forward = glm::vec4(glm::normalize(m_cameraForward), 0);
         d.invProjection = glm::inverse(d.projection);
@@ -314,24 +368,41 @@ public:
     MaterialDatabase materialDatabase;
     
     Scene(RenderContext& context): 
-        m_renderContext(context), materialDatabase(context),
-        m_nextObjectPosition(0), m_indices(), m_vertices(), m_models(), m_modelPassMapping()
+        m_renderContext(context), materialDatabase(context), 
+        m_indices(), m_vertices(), m_models(), m_modelPassMapping()
     {
         PopulateScene();
         InitializeResources();
     }
 
+    uint32_t AddMaterial(Material material) {
+        uint32_t material_index = m_materials.size();
+        m_materials.push_back(material);
+        return material_index;
+    }
+
     uint32_t AddObject(const char* path, std::initializer_list<Pass*> materialPasses) {
         
-        uint32_t indexStart = m_indices.size();
-        loadModel(m_renderContext, path, m_vertices, m_indices);
-        
-        uint32_t indexSize = m_indices.size() - indexStart;
+        std::string key = path;
+
+        auto entry = m_loadedModels.find(key);
+        if (entry == m_loadedModels.end()) {
+            uint32_t indexStart = m_indices.size();
+            loadModel(m_renderContext, path, m_vertices, m_indices);
+            
+            uint32_t indexSize = m_indices.size() - indexStart;
+            m_loadedModels[key] = std::make_tuple(indexStart, indexSize);
+            entry = m_loadedModels.find(key);
+        }
+
+        uint32_t indexStart;
+        uint32_t indexSize;
+        std::tie(indexStart, indexSize) = entry->second;
         
         uint32_t modelIndex = m_models.size();
 
         m_models.push_back(ModelData {
-            .indexOffset = m_nextObjectPosition,
+            .indexOffset = indexStart,
             .indexSize = indexSize,
             .modelTransform = glm::identity<glm::mat4x4>()
         });
@@ -339,8 +410,6 @@ public:
         for (Pass* material : materialPasses) {
             m_modelPassMapping[material].push_back(modelIndex);
         }
-
-        m_nextObjectPosition += indexSize;
 
         return modelIndex;
     }
@@ -353,6 +422,14 @@ public:
     void OnBeginFrame() {
 
         DispalyUI();
+
+        for (Material& material : m_materials) {
+            material.range = m_renderContext.Get<DynamicUniforms>().Allocate(MaterialData {
+                glm::vec4(material.f0, material.roughness),
+                glm::vec4(material.albedo, material.metallness),
+                material.imageId
+            });
+        }
         
         for (ModelData& model : m_models) {
             ModelTransforms transforms {
@@ -360,11 +437,7 @@ public:
                 glm::inverse(model.modelTransform)
             };
             model.transformsRange = m_renderContext.Get<DynamicUniforms>().Allocate(transforms);
-            model.textureIds = m_renderContext.Get<DynamicUniforms>().Allocate(PerModelData {
-                glm::vec4(f0, roughness),
-                metallicness,
-                model.imageId
-            });
+            model.materialRange = m_materials[model.material].range;
         }
     }
 
@@ -401,7 +474,8 @@ public:
         }
         
         if (!m_skyboxActual) {
-            skyboxPass.Run(m_resources.skybox, drawContext.lights, m_skyboxGenData);
+            postProcessSkyboxPass.Run(m_resources.skybox_raw, m_resources.linearSampler, m_resources.skybox);
+            // skyboxPass.Run(m_resources.skybox, drawContext.lights, m_skyboxGenData);
             generateIblPass.Run(m_resources.skybox, m_resources.linearSampler, m_resources.diffuseIbl, m_resources.specularIbl);
             m_skyboxActual = true;
         }
@@ -413,7 +487,7 @@ public:
         drawContext.mainViewCamera = directShadowmapRange;
         drawContext.depth = m_resources.directShadowmap;
         m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(m_resources.directShadowmap);
-        DrawPass(drawContext, directShadowmapPass);
+        // DrawPass(drawContext, directShadowmapPass);
 
         drawContext.depth = m_resources.depthBuffer;
         drawContext.mainViewCamera = mainViewCameraRange;

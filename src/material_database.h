@@ -141,7 +141,7 @@ struct MaterialDatabase
                 std::apply([&](auto... args) {node.SetBindings(args...);}, parameters);
             }
             else {
-                ShaderDynamicState state = std::apply([&](auto... args) -> ShaderDynamicState {
+                state = std::apply([&](auto... args) -> ShaderDynamicState {
                     return drawContext.context.Get<Descriptors>().GatherDynamicState(args...);
                 }, parameters);
             }

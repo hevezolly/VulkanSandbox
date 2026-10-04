@@ -45,7 +45,7 @@ void main() {
             B * localDir.y +
             N * localDir.z;
 
-        sum += textureLod(skybox, direction, 0.0).rgb;
+        sum += textureLod(skybox, direction, 0.0).rgb * 3;
     }
 
     vec3 result = sum / float(sampleCount);
