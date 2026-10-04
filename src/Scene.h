@@ -44,7 +44,7 @@ class Scene {
     LightsConfig m_lights {
         .dirLightTransform = glm::identity<glm::mat4>(),
         .dirLightDirection = {0, -0.94, 0.33, 0},
-        .dirLightColor = {1, 1, 1, 3},
+        .dirLightColor = {1, 1, 1, 7},
         .depthBias = 0.0005f
     };
 
@@ -75,8 +75,8 @@ class Scene {
 
 
     glm::vec3 f0 = {0, 0, 0};
-    float roughness = 0.1f;
-    float metallicness = 0.3f;
+    float roughness = 0.71f;
+    float metallicness = 0.055f;
 
     DebugData m_debugData;
 
@@ -164,37 +164,37 @@ class Scene {
         const int xSize = 5;
         const int ySize = 5;
 
-        for (int roughness = 0; roughness < xSize; roughness++) {
-            for (int metallness = 0; metallness < ySize; metallness++) {
-                uint32_t material = AddMaterial(Material{
-                    .f0 = glm::vec3(1.000, 0.766, 0.336),
-                    .roughness = static_cast<float>(roughness) / (xSize - 1),
-                    .metallness = static_cast<float>(metallness) / (ySize - 1),
-                    .albedo = glm::vec3(1.000, 0.766, 0.336)
-                });
+        // for (int roughness = 0; roughness < xSize; roughness++) {
+        //     for (int metallness = 0; metallness < ySize; metallness++) {
+        //         uint32_t material = AddMaterial(Material{
+        //             .f0 = glm::vec3(1.000, 0.766, 0.336),
+        //             .roughness = static_cast<float>(roughness) / (xSize - 1),
+        //             .metallness = static_cast<float>(metallness) / (ySize - 1),
+        //             .albedo = glm::vec3(1.000, 0.766, 0.336)
+        //         });
 
-                uint32_t sphere = AddObject("models/sphere.obj",
-                    {&depthPass, &colorPass, &directShadowmapPass}
-                );
-                m_models[sphere].material = material;
-                m_models[sphere].modelTransform = glm::translate(
-                    m_models[sphere].modelTransform, 
-                    glm::vec3(static_cast<float>(roughness) * 2.5, 0, static_cast<float>(metallness) * 2.5)
-                );
-            }
-        }
+        //         uint32_t sphere = AddObject("models/sphere.obj",
+        //             {&depthPass, &colorPass, &directShadowmapPass}
+        //         );
+        //         m_models[sphere].material = material;
+        //         m_models[sphere].modelTransform = glm::translate(
+        //             m_models[sphere].modelTransform, 
+        //             glm::vec3(static_cast<float>(roughness) * 2.5, 0, static_cast<float>(metallness) * 2.5)
+        //         );
+        //     }
+        // }
 
-        // uint32_t material = AddMaterial(Material{
-        //     .f0 = f0,
-        //     .roughness = roughness,
-        //     .metallness = metallicness,
-        //     .albedo = glm::vec3(1, 1, 1),
-        //     .imageId = 0
-        // });
+        uint32_t material = AddMaterial(Material{
+            .f0 = f0,
+            .roughness = roughness,
+            .metallness = metallicness,
+            .albedo = glm::vec3(1, 1, 1),
+            .imageId = 0
+        });
         
-        // uint32_t viking_room = AddObject("models/viking_room.obj", 
-        //     {&depthPass, &colorPass, &directShadowmapPass});
-        // m_models[viking_room].material = material;
+        uint32_t viking_room = AddObject("models/viking_room.obj", 
+            {&depthPass, &colorPass, &directShadowmapPass});
+        m_models[viking_room].material = material;
     }
 
     glm::mat4 viewMatrix(glm::vec3 pos, glm::vec3 forward, glm::vec3 right, glm::vec3 up) {
@@ -343,9 +343,10 @@ class Scene {
 
             if (ImGui::CollapsingHeader("surface")) {
 
-                ImGui::ColorPicker3("f0", &f0[0]);
-                ImGui::SliderFloat("roughness", &roughness, 0.0001f, 1.0f);
-                ImGui::SliderFloat("metallicness", &metallicness, 0.0f, 1.0f);
+                ImGui::ColorPicker3("f0", &m_materials[0].f0[0]);
+                ImGui::SliderFloat("roughness", &m_materials[0].roughness, 0.0001f, 1.0f);
+                ImGui::SliderFloat("metallicness", &m_materials[0].metallness, 0.0f, 1.0f);
+                ImGui::ColorPicker3("albedo", &m_materials[0].albedo[0]);
             }
 
             if (ImGui::CollapsingHeader("skybox")) {
@@ -421,6 +422,11 @@ public:
 
     void OnBeginFrame() {
 
+        static auto startTime = std::chrono::high_resolution_clock::now();
+
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
         DispalyUI();
 
         for (Material& material : m_materials) {
@@ -432,9 +438,12 @@ public:
         }
         
         for (ModelData& model : m_models) {
+            auto transform = glm::rotate(
+                model.modelTransform, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                
             ModelTransforms transforms {
-                model.modelTransform,
-                glm::inverse(model.modelTransform)
+                transform,
+                glm::inverse(transform)
             };
             model.transformsRange = m_renderContext.Get<DynamicUniforms>().Allocate(transforms);
             model.materialRange = m_materials[model.material].range;
@@ -487,7 +496,7 @@ public:
         drawContext.mainViewCamera = directShadowmapRange;
         drawContext.depth = m_resources.directShadowmap;
         m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(m_resources.directShadowmap);
-        // DrawPass(drawContext, directShadowmapPass);
+        DrawPass(drawContext, directShadowmapPass);
 
         drawContext.depth = m_resources.depthBuffer;
         drawContext.mainViewCamera = mainViewCameraRange;

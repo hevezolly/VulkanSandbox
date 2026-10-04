@@ -15,7 +15,7 @@ vec3 prefilterEnvironment(vec3 R, float roughness)
     vec3 V = N;
 
     if (roughness <= 0.0)
-        return textureLod(skybox, N, 0.0).rgb * 3;
+        return textureLod(skybox, N, 0.0).rgb * 2;
 
     vec3 sum = vec3(0.0);
     float totalWeight = 0.0;
@@ -32,7 +32,7 @@ vec3 prefilterEnvironment(vec3 R, float roughness)
 
         float NoL = max(dot(N, L), 0.0);
         if (NoL > 0.0) {
-            sum += textureLod(skybox, L, 0.0).rgb * NoL * 3;
+            sum += textureLod(skybox, L, 0.0).rgb * NoL * 2;
             totalWeight += NoL;
         }
     }
