@@ -39,10 +39,18 @@ struct MainPass: GeometryPass<DefaultColorAttachments, Transforms, Textures, Lig
 
             Lights lights {
                 .lightsConfig = context.lights,
+                
                 .directShadowmap = context.resources.directShadowmap,
                 .directShadowmap_sampler = context.resources.linearSampler,
+                
                 .diffuseIBL = context.resources.diffuseIbl,
-                .diffuseIBL_sampler = context.resources.linearSampler
+                .diffuseIBL_sampler = context.resources.linearSampler,
+                
+                .specularIBL = context.resources.specularIbl,
+                .specularIBL_sampler = context.resources.linearSampler,
+
+                .brdfLookup = context.resources.brdfLut,
+                .brdfLookup_sampler = context.resources.linearSampler
             };
 
             return std::tuple {transforms, textures, lights};
@@ -54,7 +62,7 @@ protected:
 
     Ref<GraphicsPipeline> CreateGraphicsPipeline(uint32_t id) override {
         ShaderBinary vertexBin = context->Get<ShaderLoader>().Get("shaders/basic.vert", Stage::Vertex);
-        ShaderBinary fragmentBin = context->Get<ShaderLoader>().Get("shaders/basic.frag", Stage::Fragment);
+        ShaderBinary fragmentBin = context->Get<ShaderLoader>().Get("shaders/shading.frag", Stage::Fragment);
         
         return context->Get<GraphicsFeature>()
             .NewGraphicsPipeline()

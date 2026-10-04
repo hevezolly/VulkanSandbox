@@ -7,6 +7,7 @@ struct CameraData {
     mat4 invView;
     mat4 invProjection;
     vec4 forward;
+    vec4 positionWorld;
 };
 
 struct LightData {
@@ -14,6 +15,7 @@ struct LightData {
     vec4 DirLightDirection;
     vec4 DirLightColor;
     float DepthBias;
+    float SpecularMipCount;
 };
 
 #endif

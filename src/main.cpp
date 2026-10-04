@@ -22,6 +22,7 @@ int main() {
         .WithFeature<Compute>()
         .WithFeature<FrameDispatcher>(3)
         .WithFeature<Registry>("resources")
+        .WithFeature<Allocator>(20240)
         .WithFeature<RenderGraph>()
         .WithFeature<DynamicUniforms>()
         .WithFeature<ImguiUI>();

@@ -21,6 +21,8 @@ layout(binding = 0, set = 2) uniform LightsDataUBO {
 
 layout(binding = 1, set = 2) uniform sampler2D directShadowmap;
 layout(binding = 2, set = 2) uniform samplerCube diffuseIbl;
+layout(binding = 3, set = 2) uniform samplerCube specularIbl;
+layout(binding = 4, set = 2) uniform sampler2D brdfLut;
 
 layout(location = 0) in vec2 uv;
 layout(location = 1) in vec3 in_normal;
@@ -46,10 +48,10 @@ void main() {
 
     vec3 f0 = mix(dielectric_f0, f0roughness.xyz, metallic);
 
-
     vec3 n = normalize(in_normal);
     vec3 l = Lights.DirLightDirection.xyz;
-    vec3 v = -camera.forward.xyz;
+    vec3 v = normalize(camera.positionWorld.xyz - position_world);
+    vec3 R = reflect(-v, n);
 
     vec3 f_factor = fresnel(f0, dot(n, v));
     vec3 kD = (vec3(1.0) - f_factor) * (1.0 - metallic);
@@ -58,13 +60,19 @@ void main() {
 
     vec3 diffuseBRDF = kD * albedo;
     vec3 diffuse = kD * albedo / PI;
-    vec3 specular = specular_brdf(l, v, n, f0roughness.w, f0);
+    vec3 specularBrdfDirLight = specularBrdf(l, v, n, f0roughness.w, f0);
 
     float NdotL = max(dot(n, Lights.DirLightDirection.xyz), 0);
     vec3 light = Lights.DirLightColor.xyz * SampleShadowmap(position_world) * Lights.DirLightColor.w;
+    vec3 dirLight = (diffuseBRDF / PI + specularBrdfDirLight) * light * NdotL;
 
-    vec3 dirLight = (diffuseBRDF / PI + specular) * light * NdotL;
     vec3 envDiffuse = diffuseBRDF * textureLod(diffuseIbl, n, 0.0).rgb;
-    outColor = vec4(dirLight + envDiffuse, 1);
+
+    vec2 secularBrdfLookup = texture(brdfLut, vec2(clamp(dot(n, v), 0.0, 1.0), clamp(f0roughness.w, 0.0, 1.0))).xy;
+    float specularSampleMip = f0roughness.w * (Lights.SpecularMipCount - 1);
+    vec3 prefilteredSpecular = textureLod(specularIbl, R, specularSampleMip).rgb;
+    vec3 envSpecular = prefilteredSpecular * (f0 * secularBrdfLookup.x + secularBrdfLookup.y);
+
+    outColor = vec4(dirLight + envDiffuse + envSpecular, 1);
 
 }

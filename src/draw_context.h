@@ -33,7 +33,9 @@ IMAGE_SAMPLER(colorTexture, 1, Stage::Fragment)
 #define BLOCK \
 DYNAMIC_UNIFORM(lightsConfig, 0, Stage::Fragment) \
 IMAGE_SAMPLER(directShadowmap, 1, Stage::Fragment) \
-IMAGE_SAMPLER(diffuseIBL, 2, Stage::Fragment)
+IMAGE_SAMPLER(diffuseIBL, 2, Stage::Fragment) \
+IMAGE_SAMPLER(specularIBL, 3, Stage::Fragment) \
+IMAGE_SAMPLER(brdfLookup, 4, Stage::Fragment)
 #include <gen_bindings.h>
 
 struct LightsConfig {
@@ -41,6 +43,7 @@ struct LightsConfig {
     glm::vec4 dirLightDirection;
     glm::vec4 dirLightColor;
     float depthBias;
+    float specularMipCount;
 };
 
 struct ModelData {
@@ -63,6 +66,8 @@ struct ResourcesRefs {
     ResourceRef<Image> directShadowmap;
     ResourceRef<Image> skybox;
     ResourceRef<Image> diffuseIbl;
+    ResourceRef<Image> specularIbl;
+    ResourceRef<Image> brdfLut;
 };
 
 struct DrawContext {

@@ -14,6 +14,7 @@
 #include "passes/generate_skybox_pass.h"
 #include "passes/draw_skybox_pass.h"
 #include "passes/generate_ibl.h"
+#include "passes/generate_specular_brdf_lut.h"
 
 class Scene {
 
@@ -23,6 +24,7 @@ class Scene {
         glm::mat4x4 invView;
         glm::mat4x4 invProjection;
         glm::vec4 forward;
+        glm::vec4 position;
     };
 
     struct PerModelData {
@@ -66,6 +68,7 @@ class Scene {
     GenerateSkyboxPass skyboxPass;
     DrawSkyboxPass drawSkyboxPass;
     GenerateIBLPass generateIblPass;
+    GenerateBrdfLut generateBrdf;
 
     glm::vec3 f0 = {0, 0, 0};
     float roughness = 0.1f;
@@ -76,6 +79,7 @@ class Scene {
     float size = 2.0f;
 
     bool m_skyboxActual = false;
+    bool m_lutGenerated = false;
 
     void InitializeResources() {
         Resources& resources = m_renderContext.Get<Resources>();
@@ -109,6 +113,19 @@ class Scene {
             ImageUsage::Storage | ImageUsage::Sampled | ImageUsage::TransferDst));
 
         resources.GiveName(m_resources.diffuseIbl, "diffuseIbl");
+
+        m_resources.specularIbl = resources.CreateImage(
+            ImageDescription::Cube(VK_FORMAT_B10G11R11_UFLOAT_PACK32, {512, 512}, 
+            ImageUsage::Storage | ImageUsage::Sampled | ImageUsage::TransferDst, 5));
+
+        resources.GiveName(m_resources.specularIbl, "specularIbl");
+
+        m_resources.brdfLut = resources.CreateImage(ImageDescription(VK_FORMAT_R16G16_SFLOAT, 
+            ImageUsage::Storage | ImageUsage::TransferDst | ImageUsage::Sampled,
+            {128, 128}
+        ));
+
+        resources.GiveName(m_resources.brdfLut, "brdfLut");
     }
 
     void PopulateScene() {
@@ -119,6 +136,7 @@ class Scene {
         skyboxPass = materialDatabase.Create<GenerateSkyboxPass>();
         drawSkyboxPass = materialDatabase.Create<DrawSkyboxPass>();
         generateIblPass = materialDatabase.Create<GenerateIBLPass>();
+        generateBrdf = materialDatabase.Create<GenerateBrdfLut>();
         
         uint32_t viking_room = AddObject("models/viking_room.obj", 
             {&depthPass, &colorPass, &directShadowmapPass});
@@ -150,6 +168,7 @@ class Scene {
         d.forward = glm::vec4(glm::normalize(m_cameraForward), 0);
         d.invProjection = glm::inverse(d.projection);
         d.invView = glm::inverse(d.view);
+        d.position = glm::vec4(m_cameraPosition, 0);
         return d;
     }
 
@@ -364,6 +383,7 @@ public:
             .Allocate(UpdateCameraPosition());
         
         m_lights.dirLightTransform = shadowmapCamera.projection * shadowmapCamera.view;
+        m_lights.specularMipCount = static_cast<float>(m_resources.specularIbl->description.mipLevels);
 
         DrawContext drawContext {
             .mainViewCamera = mainViewCameraRange,
@@ -375,10 +395,14 @@ public:
             .context = m_renderContext
         };
 
+        if (!m_lutGenerated) {
+            generateBrdf.Run(m_resources.brdfLut);
+            m_lutGenerated = true;
+        }
         
         if (!m_skyboxActual) {
             skyboxPass.Run(m_resources.skybox, drawContext.lights, m_skyboxGenData);
-            generateIblPass.Run(m_resources.skybox, m_resources.diffuseIbl, m_resources.linearSampler);
+            generateIblPass.Run(m_resources.skybox, m_resources.linearSampler, m_resources.diffuseIbl, m_resources.specularIbl);
             m_skyboxActual = true;
         }
         drawSkyboxPass.Run(output, m_resources.skybox, m_resources.linearSampler, mainViewCameraRange);
