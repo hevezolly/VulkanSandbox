@@ -2,11 +2,16 @@
 
 #include "../material_database.h"
 
+#define BLOCK_NAME DrawSkyboxAttachments
+#define MSAA 4
+#define BLOCK \
+COLOR(color, LoadOp::Load)
+#include <gen_attachments.h>
+
 #define BLOCK_NAME DrawSkyboxInput
 #define BLOCK \
-IMAGE_SAMPLER(skybox, 1, Stage::Compute) \
-IMAGE_STORAGE(output, 2, Stage::Compute, Access::Write) \
-DYNAMIC_UNIFORM(cameraData, 0, Stage::Compute)
+IMAGE_SAMPLER(skybox, 1, Stage::Fragment) \
+DYNAMIC_UNIFORM(cameraData, 0, Stage::Fragment)
 #include <gen_bindings.h>
 
 struct DrawSkyboxPass: Pass {
@@ -15,30 +20,39 @@ struct DrawSkyboxPass: Pass {
 
     void Run(ResourceRef<Image> output, ResourceRef<Image> skybox, ResourceRef<Sampler> sampler, BufferRegion cameraData) {
 
-        auto& node = context->Get<RenderGraph>().AddNode<ComputeNode<DrawSkyboxInput>>(
-            GetComputePipeline(), QueueType::Compute
+        auto& node = context->Get<RenderGraph>().AddNode<GraphicsNode<DrawSkyboxAttachments, DrawSkyboxInput>>(
+            GetGraphicsPipeline()
         );
 
-        auto b = DrawSkyboxInput {
+        node.SetBindings(DrawSkyboxInput {
             .skybox = skybox,
             .skybox_sampler = sampler,
-            .output = output,
             .cameraData = cameraData
-        };
+        });
+        node.SetAttachments(DrawSkyboxAttachments {
+            .color = output
+        });
 
-        node.SetBindings(b);
-
-        node.SetGroups((output->description.width + 7) / 8, (output->description.height + 7) / 8, 1);
+        node.AddDrawParameters(DrawParameters{6, 0});
     }
 
 protected:
-    Ref<ComputePipeline> CreateComputePipeline(uint32_t) {
+    Ref<GraphicsPipeline> CreateGraphicsPipeline(uint32_t) {
         
-        ShaderBinary shader = context->Get<ShaderLoader>().Get("shaders/drawSkybox.comp", Stage::Compute);
-
-        return context->Get<Compute>().NewComputePipeline()
-            .AddShaderStage(shader)
+        ShaderBinary vertexBin = context->Get<ShaderLoader>().Get("shaders/fullScreenQuad.vert", Stage::Vertex);
+        ShaderBinary fragmentBin = context->Get<ShaderLoader>().Get("shaders/drawSkybox.frag", Stage::Fragment);
+        
+        return context->Get<GraphicsFeature>()
+            .NewGraphicsPipeline()
             .AddLayout<DrawSkyboxInput>()
+            .SetAttachments<DrawSkyboxAttachments>(DrawSkyboxAttachments::Formats{
+                .color = context->Get<PresentFeature>().swapChainFormat(),
+            })
+            .AddShaderStage(vertexBin)
+            .AddShaderStage(fragmentBin)
+            .SetCullMode(VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT, VkFrontFace::VK_FRONT_FACE_COUNTER_CLOCKWISE)
+            .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_VIEWPORT)
+            .AddDynamicState(VkDynamicState::VK_DYNAMIC_STATE_SCISSOR)
             .Build();
     }
  

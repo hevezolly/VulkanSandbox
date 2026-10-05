@@ -79,12 +79,14 @@ struct ResourcesRefs {
     ResourceRef<Image> diffuseIbl;
     ResourceRef<Image> specularIbl;
     ResourceRef<Image> brdfLut;
+    ResourceRef<Image> msaaOutput;
 };
 
 struct DrawContext {
     BufferRegion mainViewCamera;
     BufferRegion lights;
     ResourceRef<Image> output;
+    ResourceRef<Image> resolve;
     ResourceRef<Image> depth;
     ResourcesRefs& resources;
     std::vector<ModelData>& models;

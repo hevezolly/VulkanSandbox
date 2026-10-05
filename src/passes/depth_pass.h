@@ -1,26 +1,23 @@
 #pragma once
 
-#include "geometry_pass.h"
+#include "material_database.h"
 
-struct DepthPass: GeometryPass<DepthOnlyAttachments, Transforms>{
+template<typename Attachments>
+struct DepthPass: Pass{
 
-    DepthPass(): GeometryPass<DepthOnlyAttachments, Transforms>() {}
+    DepthPass(): Pass() {}
 
     DepthPass(RenderContext* context, MaterialDatabase* materialDatabase, VkCullModeFlags cullMode): 
-        GeometryPass<DepthOnlyAttachments, Transforms>(context, materialDatabase), cullMode(cullMode) {}
+        Pass(context, materialDatabase), cullMode(cullMode) {}
 
-    void Run(const DrawContext& drawContext, std::vector<uint32_t>& models) {
+    void Run(Attachments attachments, const DrawContext& drawContext, std::vector<uint32_t>& models) {
         auto& node = context->Get<RenderGraph>().AddNode<GraphicsNode<
-            DepthOnlyAttachments, 
+            Attachments, 
             Transforms
         >>(GetGraphicsPipeline(cullMode));
 
         node.SetName("Depth only node");
-        node.SetAttachments(
-            DepthOnlyAttachments{
-                .depth = drawContext.depth
-            }
-        );
+        node.SetAttachments(attachments);
         
         MaterialDatabase::QueueDrawModels(node, drawContext, models, 
             [](const ModelData& model, const DrawContext& context) {
@@ -42,7 +39,7 @@ protected:
             .NewGraphicsPipeline()
             .AddVertex<Vertex>()
             .AddLayout<Transforms>()
-            .SetAttachments<DepthOnlyAttachments>(DepthOnlyAttachments::Formats{
+            .SetAttachments<Attachments>(typename Attachments::Formats{
                 .depth = materialDatabase->depthFormat
             })
             .AddShaderStage(vertexBin)

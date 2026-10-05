@@ -1,15 +1,15 @@
 #pragma once
 
-#include "geometry_pass.h"
+#include "material_database.h"
 
-struct MainPass: GeometryPass<DefaultColorAttachments, Transforms, Textures, Lights> {
+struct MainPass: Pass {
 
-    using GeometryPass<DefaultColorAttachments, Transforms, Textures, Lights>::GeometryPass;
+    using Pass::Pass;
 
-    void Run(const DrawContext& drawContext, std::vector<uint32_t>& models) override {
+    void Run(const DrawContext& drawContext, std::vector<uint32_t>& models) {
 
         auto& node = context->Get<RenderGraph>().AddNode<GraphicsNode<
-            DefaultColorAttachments, 
+            ColorDepthWithResolve, 
             Transforms,
             Textures,
             Lights
@@ -17,9 +17,10 @@ struct MainPass: GeometryPass<DefaultColorAttachments, Transforms, Textures, Lig
 
         node.SetName("Default Color Node");
         node.SetAttachments(
-            DefaultColorAttachments{
+            ColorDepthWithResolve{
                 .color = drawContext.output,
-                .depth = drawContext.depth
+                .color_resolve = drawContext.resolve,
+                .depth = drawContext.depth,
             }
         );
         
@@ -70,7 +71,7 @@ protected:
             .AddLayout<Transforms>()
             .AddLayout<Textures>()
             .AddLayout<Lights>()
-            .SetAttachments<DefaultColorAttachments>(DefaultColorAttachments::Formats{
+            .SetAttachments<ColorDepthWithResolve>(ColorDepthWithResolve::Formats{
                 .color = context->Get<PresentFeature>().swapChain->format,
                 .depth = materialDatabase->depthFormat
             })

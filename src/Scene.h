@@ -64,9 +64,9 @@ class Scene {
     std::unordered_map<std::string, std::tuple<uint32_t, uint32_t>> m_loadedModels;
     std::unordered_map<Pass*, std::vector<uint32_t>> m_modelPassMapping;
 
-    DepthPass depthPass;
+    DepthPass<DepthMSAAAttachments> depthPass;
     MainPass colorPass;
-    DepthPass directShadowmapPass;
+    DepthPass<DepthAttachments> directShadowmapPass;
     GenerateSkyboxPass skyboxPass;
     DrawSkyboxPass drawSkyboxPass;
     GenerateIBLPass generateIblPass;
@@ -94,9 +94,11 @@ class Scene {
         m_resources.indexBuffer = resources.CreateBuffer(BufferPreset::INDEX, m_indices);
         resources.GiveName(m_resources.indexBuffer, "index buffer");
         
-        auto extents = m_renderContext.Get<PresentFeature>().swapChain->extent;
+        auto extents = m_renderContext.Get<PresentFeature>().swapChainExtent();
         m_resources.depthBuffer = resources.CreateImage(ImageDescription(materialDatabase.depthFormat, 
-            ImageUsage::DepthStencil | ImageUsage::TransferDst | ImageUsage::Sampled, extents));
+            ImageUsage::DepthStencil | ImageUsage::TransferDst | ImageUsage::Sampled, extents)
+            .with_msaa(VK_SAMPLE_COUNT_4_BIT)
+        );
         resources.GiveName(m_resources.depthBuffer, "depth buffer");
 
         m_resources.linearSampler = resources.CreateSampler(SamplerFilter::LINEAR, SamplerAddressMode::CLAMP);
@@ -106,8 +108,14 @@ class Scene {
             materialDatabase.depthFormat,
             ImageUsage::DepthStencil | ImageUsage::Sampled | ImageUsage::TransferDst, {500, 500}
         ));
-
         resources.GiveName(m_resources.directShadowmap, "direct shadowmap");
+
+        m_resources.msaaOutput = resources.CreateImage(ImageDescription(m_renderContext.Get<PresentFeature>().swapChainFormat(), 
+            ImageUsage::ColorAttachment | ImageUsage::TransferDst, extents)
+            .with_msaa(VK_SAMPLE_COUNT_4_BIT)
+        );
+        resources.GiveName(m_resources.msaaOutput, "msaa output");
+
 
         m_resources.skybox_raw = resources.LoadCubeImage(
             ImageUsage::Sampled | ImageUsage::TransferDst,
@@ -148,8 +156,8 @@ class Scene {
     }
 
     void InitPasses() {
-        depthPass = materialDatabase.Create<DepthPass>(VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT);
-        directShadowmapPass = materialDatabase.Create<DepthPass>(VkCullModeFlagBits::VK_CULL_MODE_FRONT_BIT);
+        depthPass = materialDatabase.Create<DepthPass<DepthMSAAAttachments>>(VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT);
+        directShadowmapPass = materialDatabase.Create<DepthPass<DepthAttachments>>(VkCullModeFlagBits::VK_CULL_MODE_FRONT_BIT);
         colorPass = materialDatabase.Create<MainPass>();
         skyboxPass = materialDatabase.Create<GenerateSkyboxPass>();
         drawSkyboxPass = materialDatabase.Create<DrawSkyboxPass>();
@@ -415,11 +423,6 @@ public:
         return modelIndex;
     }
 
-    template<typename P>
-    void DrawPass(DrawContext& drawContext, P& pass) {
-        pass.Run(drawContext, m_modelPassMapping[&pass]);
-    }
-
     void OnBeginFrame() {
 
         static auto startTime = std::chrono::high_resolution_clock::now();
@@ -440,6 +443,8 @@ public:
         for (ModelData& model : m_models) {
             auto transform = glm::rotate(
                 model.modelTransform, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+            
+            // auto transform = model.modelTransform
                 
             ModelTransforms transforms {
                 transform,
@@ -456,6 +461,7 @@ public:
             m_resources.depthBuffer->description.height != output->description.height) {
 
             m_resources.depthBuffer = m_renderContext.Get<Resources>().Resize(m_resources.depthBuffer, {output->description.width, output->description.height});
+            m_resources.msaaOutput = m_renderContext.Get<Resources>().Resize(m_resources.msaaOutput, {output->description.width, output->description.height});
         }
 
         CameraData shadowmapCamera = GetShadowmapViewProjection();
@@ -470,7 +476,8 @@ public:
         DrawContext drawContext {
             .mainViewCamera = mainViewCameraRange,
             .lights = m_renderContext.Get<DynamicUniforms>().Allocate(m_lights),
-            .output = output,
+            .output = m_resources.msaaOutput,
+            .resolve = output,
             .depth = m_resources.depthBuffer,
             .resources = m_resources,
             .models = m_models,
@@ -488,20 +495,26 @@ public:
             generateIblPass.Run(m_resources.skybox, m_resources.linearSampler, m_resources.diffuseIbl, m_resources.specularIbl);
             m_skyboxActual = true;
         }
-        drawSkyboxPass.Run(output, m_resources.skybox, m_resources.linearSampler, mainViewCameraRange);
+
+        drawSkyboxPass.Run(m_resources.msaaOutput, m_resources.skybox, m_resources.linearSampler, mainViewCameraRange);
         
         m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(m_resources.depthBuffer);
-        DrawPass(drawContext, depthPass);
+        depthPass.Run(DepthMSAAAttachments {
+            .depth = m_resources.depthBuffer
+        }, drawContext, m_modelPassMapping[&depthPass]);
 
         drawContext.mainViewCamera = directShadowmapRange;
         drawContext.depth = m_resources.directShadowmap;
+
         m_renderContext.Get<RenderGraph>().AddNode<ClearImageNode>(m_resources.directShadowmap);
-        DrawPass(drawContext, directShadowmapPass);
+        directShadowmapPass.Run(DepthAttachments {
+            .depth = m_resources.directShadowmap
+        }, drawContext, m_modelPassMapping[&directShadowmapPass]);
 
         drawContext.depth = m_resources.depthBuffer;
         drawContext.mainViewCamera = mainViewCameraRange;
         
-        DrawPass(drawContext, colorPass);
+        colorPass.Run(drawContext, m_modelPassMapping[&colorPass]);
         
     }
 

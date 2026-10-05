@@ -2,23 +2,19 @@
 #extension GL_ARB_shading_language_include : enable
 #include <commonData.glsl>
 
-layout(binding = 1) uniform samplerCube skybox;
-layout(rgba8, binding = 2) writeonly uniform image2D outImage;
+layout(location = 0) out vec4 FragColor;
+layout(location = 0) in vec2 TexCoords;
+  
 
+
+layout(binding = 1) uniform samplerCube skybox;
 layout(binding = 0) uniform CameraUBO {
     CameraData camera;
 };
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-void main() {
-    ivec2 texelCoord = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size = imageSize(outImage);
-
-    if (any(greaterThanEqual(texelCoord, size)))
-        return;
-
-    vec2 uv = (vec2(texelCoord) + 0.5) / vec2(size);
-    vec2 ndc = uv * 2.0 - 1.0;
+void main()
+{             
+    vec2 ndc = TexCoords * 2.0 - 1.0;
 
     // Vulkan NDC depth is [0, 1]. An interior depth also works
     // with reverse-Z and avoids an infinite far-plane endpoint.
@@ -31,5 +27,6 @@ void main() {
     );
 
     vec3 value = textureLod(skybox, worldDir, 0.0).rgb;
-    imageStore(outImage, texelCoord, vec4(value, 1.0));
+
+    FragColor = vec4(value, 1.0);
 }

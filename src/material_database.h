@@ -5,20 +5,22 @@
 #include "model_loader.h"
 #include "draw_context.h"
 
-#define BLOCK_NAME DefaultColorAttachments
+#define BLOCK_NAME ColorDepthWithResolve
+#define MSAA 4
 #define BLOCK \
-COLOR(color, LoadOp::Load) \
+COLOR(color, LoadOp::Load) RESOLVE_WITH(color_resolve) \
 DEPTH(depth, LoadOp::Load) 
 #include <gen_attachments.h>
 
-#define BLOCK_NAME DepthOnlyAttachments
+#define BLOCK_NAME DepthMSAAAttachments
+#define MSAA 4
 #define BLOCK \
 DEPTH(depth, LoadOp::Load)
 #include <gen_attachments.h>
 
-#define BLOCK_NAME ColorOnlyAttachments
+#define BLOCK_NAME DepthAttachments
 #define BLOCK \
-COLOR(color, LoadOp::Clear)
+DEPTH(depth, LoadOp::Load)
 #include <gen_attachments.h>
 
 enum struct PipelineType {
