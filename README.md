@@ -1,6 +1,6 @@
 # VulkanSandbox
 
-Small sandbox engine built on top of [my Vulkan framework](https://github.com/hevezolly/VulkanEngine) (to poke around and explore its possibilities).
+This is merely a demo, of what [my Vulkan framework](https://github.com/hevezolly/VulkanEngine) is capable of. Thanks to the framework's design I was able to make this demo in just a couple of days. If you're intereseted in the base engine - visit the main engine repo https://github.com/hevezolly/VulkanEngine
 
 The sandbox features
 - depth pre-pass
