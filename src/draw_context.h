@@ -53,7 +53,7 @@ struct Material {
     glm::vec3 albedo;
     uint32_t imageId = 0xffffffff;
 
-    BufferRegion range;
+    BufferRegion range = BufferRegion::Null();
 };
 
 struct ModelData {
@@ -63,8 +63,8 @@ struct ModelData {
     glm::mat4x4 modelTransform;
     uint32_t material;
             
-    BufferRegion transformsRange;
-    BufferRegion materialRange;
+    BufferRegion transformsRange = BufferRegion::Null();
+    BufferRegion materialRange = BufferRegion::Null();
 };
 
 struct ResourcesRefs {
